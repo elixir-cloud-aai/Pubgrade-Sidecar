@@ -3,7 +3,7 @@ server:
     port: 8080
     debug: True
     environment: development
-    testing: False
+    testing: True
     use_reloader: True
 
 api:

@@ -1,58 +1,16 @@
 openapi: 3.0.2
 info:
-  title: 'Sidecar service to update deployment on k8s-cluster  '
+  title: Sidecar service to update deployment on k8s-cluster
   version: 1.0.0
-  description: |
-    The project is to implement a microservice which would be co-deployed
-    along with pubgrade (i.e. an open-source decoupled,
-    publish-subscribe-based CI/CD solution that sits between CI and CD that
-    allows developers to notify deployments of available updates) in
-    Kubernetes to listen for update notifications from pubgrade and update
-    the subscribed service accordingly.
+  description: >
+    The project is to implement a microservice which would be co-deployed along
+    with pubgrade in Kubernetes cluster at deployments to listen for update
+    notifications from pubgrade and update the subscribed service accordingly.
+    Pubgrade is open-source decoupled, publish-subscribe-based CI/CD solution
+    that sits between CI and CD that allows developers to notify deployments of
+    available updates.
 paths:
   /deployment:
-    # post:
-    #   summary: 'Register new deployment'
-    #   description: Create new deployment on the cluster. Deployment can
-#    also be created manually.
-    #   operationId: postDeployment
-    #   tags:
-    #     - deployment
-    #   parameters:
-    #     - in: header
-    #       name: X-Access-Token
-    #       required: true
-    #       schema:
-    #         type: string
-    #       description: Secret used to identify source of request.
-    #   requestBody:
-    #     description: Schema for deployment 
-    #     required: true
-    #     content:
-    #       application/json:
-    #         schema:
-    #           $ref: '#/components/schemas/Deployment'
-    #           additionalProperties: false
-    #   responses:
-    #     '200':
-    #       description: 'The deployment was successfully created.'
-    #       content:
-    #         application/json:
-    #           schema:
-    #             type: string
-    #             description: 'The deployment was successfully created with
-#    this `deployment_id`'
-    #             example: 'deploy_123'
-    #     '400':
-    #       $ref: '#/components/responses/BadRequest'
-    #     '401':
-    #       $ref: '#/components/responses/Unauthorized'
-    #     '403':
-    #       $ref: '#/components/responses/Forbidden'
-    #     '500':
-    #       $ref: '#/components/responses/InternalServerError'
-    #     default:
-    #       $ref: '#/components/responses/Error'
     get:
       summary: 'List available deployments.'
       operationId: getDeployment
@@ -60,7 +18,7 @@ paths:
         - deployment
       responses:
         '200':
-          description: 'List of available repositories'
+          description: 'List of available deployments'
           content:
             application/json:
               schema:
@@ -80,7 +38,7 @@ paths:
           $ref: '#/components/responses/Error'
   /deployment/{deployment-name}:
     get:
-      summary: 'Retrieve current deployment image for the deployement'
+      summary: 'Retrieve container image of the specified deployement'
       operationId: getImage
       tags:
         - deployment
@@ -91,22 +49,15 @@ paths:
           schema:
             type: string
           description: Secret used to identify source of request.
-        # - in: path
-        #   name: id
-        #   required: true
-        #   schema:
-        #     type: string
-        #   description: Identifier generated when registering new deployemnt 
-        #     via `POST /deployemnts`
         - in: path
           name: deployment-name
           required: true
           schema:
             type: string
-          description: Name of the deployment to be modified.
+          description: Name of the deployment to be retrieved.
       responses:
         '200':
-          description: 'List of available repositories'
+          description: 'Container info of the specified deployment.'
           content:
             application/json:
               schema:
@@ -124,8 +75,7 @@ paths:
         default:
           $ref: '#/components/responses/Error'
     put:
-      summary: 'Modify registered deployment'
-      description: Register
+      summary: 'Modify specified already deployed deployment on the cluster'
       operationId: updateDeployment
       tags:
         - deployment
@@ -136,13 +86,6 @@ paths:
           schema:
             type: string
           description: Secret used to identify source of request.
-        # - in: path
-        #   name: id
-        #   required: true
-        #   schema:
-        #     type: string
-        #   description: Identifier generated when registering new deployemnt 
-        #     via `POST /deployemnts`
         - in: path
           name: deployment-name
           required: true
@@ -150,7 +93,7 @@ paths:
             type: string
           description: Name of the deployment to be modified.
       requestBody:
-        description: Schema for deployment 
+        description: Deployment information
         required: true
         content:
           application/json:
@@ -159,12 +102,12 @@ paths:
               additionalProperties: false
       responses:
         '200':
-          description: 'The deployment was successfully created'
+          description: 'The deployment is successfully updated'
           content:
             application/json:
               schema:
                 type: string
-                description: 'The deployment was successfully created'
+                description: 'The deployment is successfully updated'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -176,8 +119,7 @@ paths:
         default:
           $ref: '#/components/responses/Error'
     delete:
-      summary: 'Delete registered deployment'
-      description: Register
+      summary: 'Delete deployment'
       operationId: deleteDeployment
       tags:
         - deployment
@@ -188,27 +130,20 @@ paths:
           schema:
             type: string
           description: Secret used to identify source of request.
-        # - in: path
-        #   name: id
-        #   required: true
-        #   schema:
-        #     type: string
-        #   description: Identifier generated when registering new deployemnt 
-        #     via `POST /deployemnts`
         - in: path
           name: deployment-name
           required: true
           schema:
             type: string
-          description: Name of the deployment to be modified.
+          description: Name of the deployment to be deleted.
       responses:
         '200':
-          description: 'The deployment was successfully created'
+          description: 'The deployment is successfully deleted'
           content:
             application/json:
               schema:
                 type: string
-                description: 'The deployment was successfully created'
+                description: 'The deployment is successfully deleted'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -276,13 +211,13 @@ components:
                 type: string
                 description: Image tag
                 example: v0.1
-            developer_trust:
-                type: string
-                description: Public key of secret used to sign docker trust.
+            # developer_trust:
+            #     type: string
+            #     description: Public key of secret used to sign docker trust.
       required:
         - image_name
         - tag
-        - developer_trust
+        # - developer_trust
     Error:
       type: object
       properties:
