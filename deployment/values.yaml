@@ -1,6 +1,6 @@
 serviceaccountname: pod-executer
-appname: pubgrade-sidecar
-imagename: akash7778/pubgrade-sidecar
+appname: pubgrade_sidecar
+imagename: akash7778/pubgrade_sidecar
 containerport: 8080
 nodeport: 30003
 secret: Akash@123

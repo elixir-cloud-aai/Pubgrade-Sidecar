@@ -1,19 +1,14 @@
-import logging
 from kubernetes import client, config
 import os
-import shutil
-import time
 import re
 
 
 from flask import current_app, request
 from werkzeug.exceptions import InternalServerError, NotFound, Unauthorized
-import yaml
-from git import Repo
-import json
 
 
-namespace = os.getenv("NAMESPACE", "pubgrade-sidecar")
+
+namespace = os.getenv("NAMESPACE", "pubgrade_sidecar")
 
 if os.getenv("KUBERNETES_SERVICE_HOST"):
     config.load_incluster_config()
@@ -59,12 +54,13 @@ def deleteDeployment(deployment_name: str):
     if access_token != x_access_token:
         raise Unauthorized
 
-    api_instance = client.CoreV1Api()
-    body = client.V1DeleteOptions()
-    api_response = api_instance.delete_namespaced_pod(
-        deployment_name, namespace
-    )
-    return "deleted: " + deployment_name + "  " + api_response
+    try:
+        v1.delete_namespaced_pod(
+            deployment_name, namespace
+        )
+    except Exception:
+        raise NotFound
+    return "deleted: " + deployment_name
 
 
 def updateDeployment(deployment_name: str):
@@ -90,8 +86,6 @@ def updateDeployment(deployment_name: str):
             "path": "/spec/template/spec/containers/0/image",
         }
     ]
-
-    print("Patch: %s" % patch)
     response = apiV1.patch_namespaced_deployment(
         name=deployment_name, namespace=namespace, body=patch
     )

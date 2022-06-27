@@ -21,19 +21,19 @@ updates at pubgrade) in cloud native infrastructure at deployment side.
 
 - Get available deployments in the namespace
  ```bash
- curl --location --request GET 'http://{pubgrade-sidecar-url}/deployment'
+ curl --location --request GET 'http://{pubgrade_sidecar-url}/deployment'
  ```
 
 - Get current image of the deployment.
 ```bash
-curl --location --request GET 'http://{pubgrade-sidecar-url}/deployment/
+curl --location --request GET 'http://{pubgrade_sidecar-url}/deployment/
 {deployment-name}' \
 --header 'X-Access-Token: {access-token (specified at config.yaml)}'
 ```
 
 - Modify image tag of the deployment.
 ```bash
-curl --location --request PUT 'http://{pubgrade-sidecar-url}/deployment/
+curl --location --request PUT 'http://{pubgrade_sidecar-url}/deployment/
 {deployment-name}' \
 --header 'X-Access-Token: {access-token (specified at config.yaml)}' \
 --header 'Content-Type: application/json' \

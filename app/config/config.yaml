@@ -8,10 +8,10 @@ server:
 
 api:
     specs:
-        - path: api/pubgrade-sidecar.yaml
+        - path: api/pubgrade_sidecar.yaml
           append: null
           add_operation_fields:
-              x-openapi-router-controller:  pubgrade-sidecar.controllers
+              x-openapi-router-controller:  pubgrade_sidecar.controllers
           connexion:
               strict_validation: True
               validate_responses: False
