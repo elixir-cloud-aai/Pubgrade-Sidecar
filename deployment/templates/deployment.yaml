@@ -14,9 +14,11 @@ spec:
    spec:
      serviceAccountName: {{ .Values.serviceaccountname }}
      automountServiceAccountToken: true
+     securityContext:
+       runAsUser: 1005
      containers:
      - name: {{ .Values.appname }}
-       imagePullPolicy: IfNotPresent
+       imagePullPolicy: Always
        image: {{ .Values.imagename }}
        ports:
        - containerPort: {{ .Values.containerport }}

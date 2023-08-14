@@ -1,24 +1,29 @@
 ##### BASE IMAGE #####
-FROM elixircloud/foca:latest
+FROM elixircloud/foca:v0.7.0-py3.9
 
-##### METADATA ##### 
 
-LABEL software="Pubgrade-Sidecar"
-LABEL software.description="The project is to implement a microservice which would be co-deployed along with pubgrade in Kubernetes cluster at deployments to listen for update notifications from pubgrade and update the subscribed service accordingly."
-LABEL software.website="https://github.com/akash2237778/Pubgrade-Sidecar"
+##### METADATA #####
+
+LABEL software="Pubgrade"
+LABEL software.description="Pubgrade is a decoupled, publish-subscribe-based continuous integration (CI) and continuous delivery (CD) microservice that allows developers to notify deploments of available updates."
+LABEL software.website="https://github.com/elixir-cloud-aai/Pubgrade"
 LABEL software.license="https://spdx.org/licenses/Apache-2.0"
 LABEL maintainer="akash2237778@gmail.com"
 LABEL maintainer.organisation="ELIXIR Cloud & AAI"
 
-RUN groupadd -r pubgrade --gid 1000 && useradd -d /home/pubgrade -ms /bin/bash -r -g pubgrade pubgrade --uid 1000
+RUN groupadd -r pubgrade --gid 1005 && useradd -d /home/pubgrade -ms /bin/bash -r -g pubgrade pubgrade --uid 1005
 
-## Copy app files
-COPY --chown=1000:1000 ./ /app
+## Copy remaining app files
+COPY --chown=1005:1005 ./ /app
+COPY --chown=1005:1005 ./ /app/pubgrade_sidecar/api/
+RUN chmod 777 /app/pubgrade_sidecar/api/
 
+## Install app
 RUN cd /app \
-    && pip install kubernetes \
-    && pip install gitpython
+  && python setup.py develop \
+  && pip install -r requirements.txt
 
-USER 1000
 
-CMD ["bash", "-c", "cd /app/app; python app.py"]
+USER 1005
+
+CMD ["bash", "-c", "cd /app/pubgrade_sidecar; python app.py"]
