@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: {{ .Values.appname }}
+spec:
+ replicas: 1
+ selector:
+   matchLabels:
+     app: {{ .Values.appname }}
+ template:
+   metadata:
+     labels:
+       app: {{ .Values.appname }}
+   spec:
+     serviceAccountName: {{ .Values.serviceaccountname }}
+     automountServiceAccountToken: true
+     securityContext:
+       runAsUser: 1005
+     containers:
+     - name: {{ .Values.appname }}
+       imagePullPolicy: Always
+       image: {{ .Values.imagename }}
+       ports:
+       - containerPort: {{ .Values.containerport }}
+       env:
+         - name: NAMESPACE
+           value: {{ .Release.Namespace }}
+         - name: SECRET_UUID
+           value: {{ .Values.secret }}
