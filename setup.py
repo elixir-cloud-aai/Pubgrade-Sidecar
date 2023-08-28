@@ -1,20 +1,16 @@
 from setuptools import setup, find_packages
-from pubgrade_sidecar import __version__
+from app import __version__
 #
 # with open("README.md", "r") as fh:
 #     long_description = fh.read()
 
 setup(
-    name="pubgrade",
+    name="pubgrade sidecar",
     version=__version__,
     author="ELIXIR Cloud & AAI",
     author_email="akash2237778@gmail.com",
     description=(
-        "Pubgrade is a decoupled, publish-subscribe-based continuous "
-        "integration (CI) and continuous delivery (CD) microservice "
-        "that allows developers to notify deployments of available "
-        "updates, which can then autonomously decide what to do with "
-        "them. "
+        "Pubgrade sidecar is microservice to update deployment on k8s-cluster."
     ),
     # long_description=long_description,
     long_description_content_type="text/markdown",
@@ -22,7 +18,7 @@ setup(
     url="https://github.com/elixir-cloud-aai/Pubgrade.git",
     packages=find_packages(),
     keywords=(
-        "api pubgrade_sidecar ci-cd devops docker elixir flask ga4gh mongodb openapi "
+        "api pubgrade_sidecar ci-cd devops docker elixir flask ga4gh openapi "
         "pubgrade pubsub python server subscription swagger upgrade "
     ),
     classifiers=[

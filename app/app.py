@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-from foca.foca import foca
+from foca import Foca
 
 if __name__ == "__main__":
-    app = foca("config/config.yaml")
+    foca = Foca(config_file="config/config.yaml")
+    app = foca.create_app()
     app.run()
