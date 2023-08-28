@@ -3,10 +3,10 @@ import os
 import re
 
 from flask import current_app, request, jsonify
-from werkzeug.exceptions import InternalServerError, NotFound, Unauthorized
 import requests
 import time
 from concurrent.futures import ThreadPoolExecutor
+from app.pubgrade_sidecar.errors.exceptions import Unauthorized, NotFound, DockerImageUnavailable
 
 namespace = os.getenv("NAMESPACE", "pubgrade_sidecar")
 
@@ -19,6 +19,8 @@ v1 = client.CoreV1Api()
 apiV1 = client.AppsV1Api()
 MAX_RETRY = 3
 RETRY_INTERVAL = 30
+
+
 
 
 def getDeployment():
@@ -97,10 +99,9 @@ def updateDeployment(deployment_name: str):
         return jsonify({"message": "Updating image in progress..."})
 
 
-
 def update_image(image_repo, image_tag, deployment_name, patch, retry):
     if retry > MAX_RETRY:
-        raise NotFound
+        raise DockerImageUnavailable
     if check_docker_image_availability(image_repo, image_tag):
         return apiV1.patch_namespaced_deployment(
             name=deployment_name, namespace=namespace, body=patch
@@ -113,7 +114,6 @@ def update_image(image_repo, image_tag, deployment_name, patch, retry):
 def check_docker_image_availability(image_name, tag='latest'):
     base_url = 'https://hub.docker.com'
     url = f'{base_url}/v2/repositories/{image_name}/tags/{tag}/'
-    print(url)
     response = requests.get(url)
     if response.status_code == 200:
         return True
