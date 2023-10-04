@@ -10,7 +10,7 @@ setup(
     author="ELIXIR Cloud & AAI",
     author_email="akash2237778@gmail.com",
     description=(
-        "Pubgrade sidecar is microservice to update deployment on k8s-cluster."
+        "Pubgrade sidecar is a microservice to update deployment on a k8s-cluster."
     ),
     # long_description=long_description,
     long_description_content_type="text/markdown",

@@ -115,7 +115,4 @@ def check_docker_image_availability(image_name, tag='latest'):
     base_url = 'https://hub.docker.com'
     url = f'{base_url}/v2/repositories/{image_name}/tags/{tag}/'
     response = requests.get(url)
-    if response.status_code == 200:
-        return True
-    else:
-        return False
+    return response.status_code == 200
