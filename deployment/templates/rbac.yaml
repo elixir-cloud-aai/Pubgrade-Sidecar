@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.serviceaccountname }}
+{{ if eq .Values.clusterType "openshift" }}
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ .Values.appname }}
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.serviceaccountname }}
+roleRef:
+  kind: ClusterRole
+  name: admin
+  apiGroup: rbac.authorization.k8s.io
+{{ else }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Values.appname }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  - pods/status
+  verbs:
+  - get
+  - list
+  - delete
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ .Values.appname }}
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.serviceaccountname }}
+roleRef:
+  kind: Role
+  name: {{ .Values.appname }}
+  apiGroup: rbac.authorization.k8s.io
+{{ end }}

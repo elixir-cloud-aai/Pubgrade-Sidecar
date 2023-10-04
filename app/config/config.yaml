@@ -1,0 +1,29 @@
+server:
+    host: '0.0.0.0'
+    port: 8080
+    debug: True
+    environment: development
+    testing: True
+    use_reloader: True
+
+api:
+    specs:
+        - path: api/pubgrade_sidecar.yaml
+          append: null
+          add_operation_fields:
+              x-openapi-router-controller:  app.pubgrade_sidecar.controllers
+          connexion:
+              strict_validation: True
+              validate_responses: False
+              options:
+                  swagger_ui: True
+                  serve_spec: True
+
+exceptions:
+     required_members: [['msg'], ['status_code']]
+     status_member: ['status_code']
+     exceptions: pubgrade.errors.exceptions.exceptions
+
+environments:
+    secrets:
+        access_token: "Access@123"

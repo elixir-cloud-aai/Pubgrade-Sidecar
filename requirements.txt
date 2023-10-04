@@ -1,0 +1,8 @@
+foca==0.12.1
+gitpython~=3.1.18
+gunicorn==20.0.4
+kubernetes~=17.17.0
+mock~=4.0.3
+setuptools==58.2.0
+yq~=2.12.2
+munch==4.0.0
