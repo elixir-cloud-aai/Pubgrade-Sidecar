@@ -6,7 +6,7 @@ from flask import current_app, request, jsonify
 import requests
 import time
 from concurrent.futures import ThreadPoolExecutor
-from app.pubgrade_sidecar.errors.exceptions import Unauthorized, NotFound, DockerImageUnavailable
+from pubgrade_sidecar.errors.exceptions import Unauthorized, NotFound, DockerImageUnavailable
 
 namespace = os.getenv("NAMESPACE", "pubgrade_sidecar")
 

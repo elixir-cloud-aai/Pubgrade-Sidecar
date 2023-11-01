@@ -15,8 +15,7 @@ RUN groupadd -r pubgrade --gid 1005 && useradd -d /home/pubgrade -ms /bin/bash -
 
 ## Copy remaining app files
 COPY --chown=1005:1005 ./ /app
-COPY --chown=1005:1005 ./ /app/pubgrade_sidecar/api/
-RUN chmod 777 /app/pubgrade_sidecar/api/
+RUN chmod 777 /app/app/api/
 
 ## Install app
 RUN cd /app \
@@ -26,4 +25,4 @@ RUN cd /app \
 
 USER 1005
 
-CMD ["bash", "-c", "cd /app/pubgrade_sidecar; python app.py"]
+CMD ["bash", "-c", "cd /app/app; python app.py"]
