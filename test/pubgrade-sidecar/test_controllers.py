@@ -5,9 +5,9 @@ from flask import Flask
 from foca.models.config import Config
 from munch import DefaultMunch
 
-from app.pubgrade_sidecar.controllers import getDeployment, getImage, \
+from pubgrade_sidecar.controllers import getDeployment, getImage, \
     deleteDeployment, updateDeployment, update_image
-from app.pubgrade_sidecar.errors.exceptions import Unauthorized, NotFound, DockerImageUnavailable
+from pubgrade_sidecar.errors.exceptions import Unauthorized, NotFound, DockerImageUnavailable
 
 ENDPOINT_CONFIG = {
     "secrets":
@@ -134,7 +134,7 @@ def mock_patch_namespaced_deployment(self, name, namespace, body):
 
 @patch('kubernetes.client.AppsV1Api.read_namespaced_deployment', mock_read_namespaced_deployment)
 @patch('kubernetes.client.AppsV1Api.patch_namespaced_deployment', mock_patch_namespaced_deployment)
-@patch('app.pubgrade_sidecar.controllers.check_docker_image_availability', return_value=True)
+@patch('pubgrade_sidecar.controllers.check_docker_image_availability', return_value=True)
 def test_update_deployment(mock_controllers):
     app = Flask(__name__)
     app.config["FOCA"] = Config(environments=ENDPOINT_CONFIG)
@@ -145,8 +145,8 @@ def test_update_deployment(mock_controllers):
         assert 'Updating image in progress...' == response.json["message"]
 
 
-@patch("app.pubgrade_sidecar.controllers.time.sleep")
-@patch("app.pubgrade_sidecar.controllers.check_docker_image_availability")
+@patch("pubgrade_sidecar.controllers.time.sleep")
+@patch("pubgrade_sidecar.controllers.check_docker_image_availability")
 @patch('kubernetes.client.AppsV1Api.patch_namespaced_deployment')
 def test_update_image_successful(mock_patch_deployment, mock_check_image, mock_sleep):
     mock_check_image.return_value = True
@@ -156,8 +156,8 @@ def test_update_image_successful(mock_patch_deployment, mock_check_image, mock_s
     mock_patch_deployment.assert_called_once()
 
 
-@patch("app.pubgrade_sidecar.controllers.time.sleep")
-@patch("app.pubgrade_sidecar.controllers.check_docker_image_availability")
+@patch("pubgrade_sidecar.controllers.time.sleep")
+@patch("pubgrade_sidecar.controllers.check_docker_image_availability")
 @patch('kubernetes.client.AppsV1Api.patch_namespaced_deployment')
 def test_update_image_retry_exhausted(mock_patch_deployment, mock_check_image, mock_sleep):
     mock_check_image.return_value = False
