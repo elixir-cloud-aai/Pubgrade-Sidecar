@@ -13,6 +13,14 @@ updates:
       - dependency-name: foca
       - dependency-name: connexion
     groups:
+      # Dependencies of the documentation (the `docs` group), in pull
+      # requests of their own
+      docs-dependencies:
+        patterns: [
+          "griffe", "mkdocs", "mkdocs-*", "mkdocstrings", "mkdocstrings-*",
+          "pymdown-extensions",
+        ]
+      # Dependencies match the first group listed
       python-dependencies:
         patterns: ["*"]
         exclude-patterns: ["connexion", "foca"]

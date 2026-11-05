@@ -57,6 +57,16 @@ dev = [
     # version of uv that CI installs (`astral-sh/setup-uv`)
     "uv>=0.13",
 ]
+# Documentation (`mkdocs.yml`), built by Read the Docs (`.readthedocs.yaml`)
+# and in CI, both from the lock. The packages that add warnings, which fail the
+# strict build, are bounded to their major versions
+docs = [
+    "mkdocs>=1.6.1,<2",
+    "mkdocs-material>=9.6,<10",
+    "mkdocstrings>=0.30,<2",
+    "mkdocstrings-python>=1.16,<2",
+    "pymdown-extensions>=10.16,<11",
+]
 
 [tool.uv]
 # The app runs from its source directory (`app/`), not as an installed

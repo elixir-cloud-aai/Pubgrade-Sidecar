@@ -1,6 +1,7 @@
 # Everything that must pass on pull requests and pushes to `master`: the pull
 # request title, lint, types and the lock, the unit tests with their coverage,
-# the image and its known vulnerabilities, and the chart. The gate
+# the documentation, the image and its known vulnerabilities, and the chart.
+# The gate
 # `passed` ("CI passed") is the only check to require. No `paths:` filters, so
 # that the gate always reports; skip jobs with `if:` instead (and allow the
 # skip in the gate). Runs also when a pull request is edited, so that the title
@@ -123,6 +124,30 @@ jobs:
           # upstream upload without a token and still fail on errors
           fail_ci_if_error: ${{ github.repository_owner == 'elixir-cloud-aai' }}
           verbose: true
+
+  # Builds the documentation (`mkdocs.yml`) as Read the Docs does
+  # (`.readthedocs.yaml`), from the dependency group `docs` of the lock
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # As in `lint`
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version-file: uv.lock
+      - name: Install dependencies
+        run: |
+          uv sync --locked --only-group docs --python 3.9
+          echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
+      # Fails on warnings, e.g., of broken links, anchors and references
+      - name: Build documentation
+        run: mkdocs build --strict
 
   # Builds the image from the commit and starts it, without a cluster: the API
   # answers, and the access token is checked against the environment
@@ -250,7 +275,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [title, lint, test, smoke, scan, chart]
+    needs: [title, lint, test, docs, smoke, scan, chart]
     permissions: {}
     steps:
       - name: Check results of all jobs

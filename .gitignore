@@ -71,3 +71,6 @@ venv/
 .pytest_cache/
 .venv/
 coverage.xml
+
+# MkDocs build
+site/

@@ -1,14 +1,22 @@
 # Pubgrade-Sidecar
 
-A microservice which would be co-deployed alongside [pubgrade][pubgrade] to
-listen for update notifications from [pubgrade][pubgrade] and update the
-subscribed service accordingly. The microservice is named as sidecar as it
-would be co-deployed with the service of interest (service registered for
-updates at pubgrade) in cloud native infrastructure at deployment side.
+<!-- --8<-- [start:synopsis] -->
+A microservice which would be co-deployed alongside
+[Pubgrade](https://github.com/elixir-cloud-aai/Pubgrade) to listen for update
+notifications from Pubgrade and update the subscribed service accordingly. The
+microservice is named as sidecar as it would be co-deployed with the service of
+interest (service registered for updates at Pubgrade) in cloud native
+infrastructure at deployment side.
 
 > **_NOTE:_**  Project is still under development.
+<!-- --8<-- [end:synopsis] -->
+
+The documentation (operator guide, API, development notes and code reference)
+is in [`docs/`](docs/index.md).
 
 ## Installation
+
+<!-- --8<-- [start:installation] -->
 
 The chart in `deployment/` installs the sidecar into the namespace of the
 Deployments to upgrade, on Kubernetes and on OpenShift. It needs no fixed user
@@ -83,35 +91,35 @@ clusterType          route.enabled or ingress.enabled
 nodeport             none
 none                 targetDeployments, required
 ```
+<!-- --8<-- [end:installation] -->
 
 ## Usage
 
+<!-- --8<-- [start:usage] -->
 All calls need the access token, which the sidecar takes from the environment
 variable `ACCESS_TOKEN`. Without that variable, it rejects all calls.
 
-- Get available deployments in the namespace
- ```bash
- curl --location --request GET 'http://{pubgrade_sidecar-url}/deployment' \
- --header 'X-Access-Token: {access-token}'
- ```
+Get the deployments in the namespace:
 
-- Get the image and the rollout status of the deployment.
 ```bash
-curl --location --request GET 'http://{pubgrade_sidecar-url}/deployment/
-{deployment-name}' \
---header 'X-Access-Token: {access-token}'
+curl --location --request GET 'https://{sidecar-host}/deployment' \
+  --header 'X-Access-Token: {access-token}'
 ```
 
-- Modify image tag of the deployment.
+Get the image and the rollout status of a deployment:
+
 ```bash
-curl --location --request PUT 'http://{pubgrade_sidecar-url}/deployment/
-{deployment-name}' \
---header 'X-Access-Token: {access-token}' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "image_name": "elixircloud/tesk-api",
-    "tag": "1.2.0"
-}'
+curl --location --request GET 'https://{sidecar-host}/deployment/{deployment-name}' \
+  --header 'X-Access-Token: {access-token}'
+```
+
+Notify the sidecar of a new image tag for a deployment:
+
+```bash
+curl --location --request PUT 'https://{sidecar-host}/deployment/{deployment-name}' \
+  --header 'X-Access-Token: {access-token}' \
+  --header 'Content-Type: application/json' \
+  --data-raw '{"image_name": "elixircloud/tesk-api", "tag": "1.2.0"}'
 ```
 
 A notification returns at once, with status 202; the rollout runs in the
@@ -150,18 +158,21 @@ the API, it returns this object instead of only the image:
 `status` is `waiting_for_image`, `rolling_out`, `complete` or `failed` (with
 an explanation in `detail`). A failure counts until the deployment has the
 requested image, and a change of the deployment after a rollout, e.g., a
-rollback, counts over the last notification. A newer notification replaces one that still waits for its
-image.
+rollback, counts over the last notification. A newer notification replaces
+one that still waits for its image.
 
 `requested_image` and `detail` are kept in memory: a restart loses a notification
 that is still waiting for its image, without a report. Afterwards, `status` only
 tells the state of the deployment, so compare `image` with what was notified.
+<!-- --8<-- [end:usage] -->
 
 ## Development
 
+<!-- --8<-- [start:development] -->
 CI (`.github/workflows/ci.yml`) checks the pull request title, runs the linters
 and type checks, runs the unit tests with their coverage, builds and starts the
-image, scans it for known vulnerabilities and lints and tests the chart.
+image, scans it for known vulnerabilities, lints and tests the chart and
+builds the documentation.
 
 Dependencies are declared in `pyproject.toml` and locked, with their hashes, in
 `uv.lock`; the image installs exactly the locked runtime dependencies. Use
@@ -195,8 +206,20 @@ Dependabot proposes updates of the locked dependencies, the actions, the image
 of uv and the hooks. FOCA, and with it connexion and the base image, is updated
 by hand.
 
+The documentation is built with [MkDocs](https://www.mkdocs.org/) and
+[Material for MkDocs](https://squidfunk.github.io/mkdocs-material/) from
+`docs/` (`mkdocs.yml`), with the dependency group `docs` of the lock; the code
+reference comes from the docstrings. Its pages include the sections of this
+README, between the `--8<--` markers, so that nothing is written twice. Serve
+it locally while editing, or build it as CI and Read the Docs
+(`.readthedocs.yaml`) do, which fails on warnings, e.g., broken links:
+
+```bash
+uv run --group docs mkdocs serve
+uv run --group docs mkdocs build --strict
+```
+<!-- --8<-- [end:development] -->
+
 ## License
 
 [Apache License 2.0](LICENSE)
-
-[pubgrade]: <https://github.com/elixir-cloud-aai/Pubgrade>
