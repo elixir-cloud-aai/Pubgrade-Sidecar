@@ -76,7 +76,7 @@ jobs:
         run: pytest --cov --cov-report=term-missing
 
   # Builds the image from the commit and starts it, without a cluster: the API
-  # answers, and the access token is checked against the app's configuration
+  # answers, and the access token is checked against the environment
   smoke:
     name: Smoke test
     runs-on: ubuntu-latest

@@ -76,12 +76,33 @@ def test_get_deployments_unauthorized():
 
 @pytest.mark.parametrize('headers', [{}, {'X-Access-Token': ''},
                                      {'X-Access-Token': 'test-token'}])
-def test_no_token_configured(monkeypatch, headers):
+@pytest.mark.parametrize('call', [
+    getDeployment,
+    lambda: getImage('pubgrade'),
+    lambda: deleteDeployment('pubgrade'),
+    lambda: updateDeployment('pubgrade'),
+])
+def test_no_token_configured(monkeypatch, headers, call):
     monkeypatch.delenv('ACCESS_TOKEN')
     app = Flask(__name__)
     with app.test_request_context('url', headers=headers):
         with pytest.raises(Unauthorized):
-            getImage('pubgrade')
+            call()
+
+
+@patch('kubernetes.client.AppsV1Api.patch_namespaced_deployment')
+@patch('kubernetes.client.AppsV1Api.read_namespaced_deployment')
+def test_update_deployment_unauthorized(mock_read, mock_patch):
+    app = Flask(__name__)
+    with app.test_request_context(
+        'url',
+        headers={'X-Access-Token': 'wrong_access_token'},
+        json={'image_name': 'akash7778/pubgrade', 'tag': '1.0'},
+    ):
+        with pytest.raises(Unauthorized):
+            updateDeployment('pubgrade')
+    mock_read.assert_not_called()
+    mock_patch.assert_not_called()
 
 
 @patch('kubernetes.client.AppsV1Api.read_namespaced_deployment', mock_read_namespaced_deployment)
