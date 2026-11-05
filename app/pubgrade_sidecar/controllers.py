@@ -55,9 +55,7 @@ def getDeployment():
 
 
 def getImage(deployment_name: str):
-    access_token = current_app.config["FOCA"].environments["secrets"][
-        "access_token"
-    ]
+    access_token = current_app.config.foca.environments["secrets"]["access_token"]
     x_access_token = request.headers["X-Access-Token"]
 
     if access_token != x_access_token:
@@ -73,9 +71,7 @@ def getImage(deployment_name: str):
 
 
 def deleteDeployment(deployment_name: str):
-    access_token = current_app.config["FOCA"].environments["secrets"][
-        "access_token"
-    ]
+    access_token = current_app.config.foca.environments["secrets"]["access_token"]
     x_access_token = request.headers["X-Access-Token"]
 
     if access_token != x_access_token:
@@ -91,9 +87,7 @@ def deleteDeployment(deployment_name: str):
 
 
 def updateDeployment(deployment_name: str):
-    access_token = current_app.config["FOCA"].environments["secrets"][
-        "access_token"
-    ]
+    access_token = current_app.config.foca.environments["secrets"]["access_token"]
     x_access_token = request.headers["X-Access-Token"]
 
     if access_token != x_access_token:
