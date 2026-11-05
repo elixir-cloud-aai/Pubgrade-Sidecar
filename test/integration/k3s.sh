@@ -7,19 +7,22 @@
 # user ID with group 0, as on OpenShift, and its target Deployment spells the
 # image with the `docker.io/` prefix.
 #
-# Needs Docker (privileged containers), kubectl, Helm, curl and jq, and
-# Internet access: the cluster pulls the target images from Docker Hub, and the
-# sidecar checks Docker Hub for them. Everything it creates is removed at the
-# end. kubectl and Helm use a kubeconfig of their own, so no other cluster is
-# touched.
+# Needs bash 4.4 or newer, Docker (privileged containers), kubectl, Helm, curl
+# and jq, and Internet access: the cluster pulls the target images from Docker
+# Hub, and the sidecar checks Docker Hub for them. At the end, it removes the
+# cluster, with its volumes, and the image it built. kubectl and Helm use a
+# kubeconfig of their own, so no other cluster is touched.
 #
 # Usage: test/integration/k3s.sh
-# Environment (optional): K3S_IMAGE; API_PORT, the port of the Kubernetes API
-# on 127.0.0.1 (default 16443); FORWARD_PORT, the first of two ports for the
-# sidecars (default 18080); KEEP=1 keeps the cluster for debugging
+# Environment (optional): K3S_IMAGE, the k3s image; API_PORT, the port of the
+# Kubernetes API on 127.0.0.1 (default 16443); FORWARD_PORT, the first of two
+# ports for the sidecars (default 18080); KEEP=1 keeps the cluster and the
+# image for debugging (remove them with `docker rm -f -v
+# pubgrade-sidecar-integration` and `docker rmi pubgrade-sidecar:integration`)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Also removed at the start, if left from an earlier run
 NAME=pubgrade-sidecar-integration
 IMAGE_REPOSITORY=pubgrade-sidecar
 IMAGE_TAG=integration
@@ -39,6 +42,7 @@ TOKEN="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/sidecar-integration.XXXXXX")"
 export KUBECONFIG="${WORK}/kubeconfig"
 FORWARDS=()
+declare -A PORTS
 FAILED=0
 
 cleanup() {
@@ -57,11 +61,30 @@ cleanup() {
   if [[ "${KEEP:-}" == 1 ]]; then
     echo "Kept the cluster: KUBECONFIG=${KUBECONFIG}"
   else
-    docker rm -f "${NAME}" > /dev/null 2>&1 || true
+    docker rm -f -v "${NAME}" > /dev/null 2>&1 || true
+    docker rmi "${IMAGE_REPOSITORY}:${IMAGE_TAG}" > /dev/null 2>&1 || true
     rm -rf "${WORK}"
   fi
 }
 trap cleanup EXIT
+# Clean up also when stopped
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Runs a command until it succeeds, at most a number of times with a delay in
+# seconds; fails with a message if it never does
+retry() {
+  local tries="$1" delay="$2" what="$3"
+  shift 3
+  for ((i = 1; i <= tries; i++)); do
+    if "$@" > /dev/null 2>&1; then
+      return 0
+    fi
+    sleep "${delay}"
+  done
+  echo "Timed out waiting for ${what}" >&2
+  return 1
+}
 
 # Checks that a value contains what is wanted; records a failure, so that all
 # checks run
@@ -96,6 +119,20 @@ report() {
     || cat "${WORK}/body"
 }
 
+# Polls the status of the target Deployment until a jq filter is true, at most
+# about three minutes; prints the last status
+await_report() {
+  local ns="$1" filter="$2" out=""
+  for _ in $(seq 1 60); do
+    out="$(report "${ns}")"
+    if jq --exit-status "${filter}" <<< "${out}" > /dev/null 2>&1; then
+      break
+    fi
+    sleep 3
+  done
+  echo "${out}"
+}
+
 notify() {
   local ns="$1" deployment="$2" repository="$3" tag="$4"
   call "${ns}" PUT "/deployment/${deployment}" "${TOKEN}" \
@@ -108,40 +145,32 @@ image_of() {
     -o jsonpath='{.spec.template.spec.containers[0].image}'
 }
 
+# Whether a namespace has exactly one sidecar pod, e.g., after a rollout, once
+# the old pod is gone
+one_sidecar_pod() {
+  [[ "$(kubectl -n "$1" get pods -l app=pubgrade-sidecar --no-headers | wc -l)" -eq 1 ]]
+}
+
 echo "== build image"
 docker build --quiet --tag "${IMAGE_REPOSITORY}:${IMAGE_TAG}" "${ROOT}" > /dev/null
 
 echo "== start k3s (${K3S_IMAGE})"
-docker rm -f "${NAME}" > /dev/null 2>&1 || true
+docker rm -f -v "${NAME}" > /dev/null 2>&1 || true
 docker run --detach --privileged --name "${NAME}" \
   --publish "127.0.0.1:${API_PORT}:6443" "${K3S_IMAGE}" server \
   --disable traefik --disable metrics-server > /dev/null
-for _ in $(seq 1 60); do
-  if docker exec "${NAME}" test -s /etc/rancher/k3s/k3s.yaml; then
-    break
-  fi
-  sleep 2
-done
+retry 60 2 "the kubeconfig" docker exec "${NAME}" test -s /etc/rancher/k3s/k3s.yaml
 docker exec "${NAME}" cat /etc/rancher/k3s/k3s.yaml \
   | sed "s#https://127.0.0.1:6443#https://127.0.0.1:${API_PORT}#" > "${KUBECONFIG}"
 chmod 600 "${KUBECONFIG}"
-for _ in $(seq 1 60); do
-  if kubectl get nodes 2> /dev/null | grep -q ' Ready'; then
-    break
-  fi
-  sleep 2
-done
-kubectl wait --for=condition=Ready node --all --timeout=60s > /dev/null
+retry 60 2 "the node" kubectl get nodes --no-headers
+kubectl wait --for=condition=Ready node --all --timeout=120s > /dev/null
 # The sidecar resolves Docker Hub, so DNS must be up
-for _ in $(seq 1 60); do
-  if kubectl -n kube-system get deployment coredns > /dev/null 2>&1; then
-    break
-  fi
-  sleep 2
-done
+retry 60 2 "CoreDNS" kubectl -n kube-system get deployment coredns
 kubectl -n kube-system rollout status deployment/coredns --timeout=180s > /dev/null
+# Into the namespace that Kubernetes uses
 docker save "${IMAGE_REPOSITORY}:${IMAGE_TAG}" \
-  | docker exec -i "${NAME}" ctr images import - > /dev/null
+  | docker exec -i "${NAME}" ctr -n k8s.io images import - > /dev/null
 
 echo "== target Deployments"
 for ns in "${NAMESPACES[@]}"; do
@@ -167,7 +196,9 @@ for ns in "${NAMESPACES[@]}"; do
     --set image.tag="${IMAGE_TAG}" \
     --set image.pullPolicy=Never > /dev/null
 done
-# In site-b, an arbitrary user ID with group 0, as OpenShift assigns them
+# In site-b, an arbitrary user ID with group 0, as OpenShift assigns them. The
+# chart has no value for the user (OpenShift sets it), so the Deployment is
+# patched, which rolls it out again
 kubectl -n site-b patch deployment pubgrade-sidecar --type=json --patch "$(
   jq --null-input --compact-output --argjson uid "${ARBITRARY_UID}" '[
     {op: "add", path: "/spec/template/spec/securityContext/runAsUser",
@@ -175,26 +206,23 @@ kubectl -n site-b patch deployment pubgrade-sidecar --type=json --patch "$(
     {op: "add", path: "/spec/template/spec/securityContext/runAsGroup",
      value: 0}]')" > /dev/null
 
-declare -A PORTS
 port="${FORWARD_PORT}"
 for ns in "${NAMESPACES[@]}"; do
   kubectl -n "${ns}" rollout status deployment/pubgrade-sidecar --timeout=180s > /dev/null
+  # Until the pod of a previous rollout is gone, which the port forward and
+  # `exec` might otherwise pick
+  retry 60 2 "the old sidecar pod in ${ns} to end" one_sidecar_pod "${ns}"
   kubectl -n "${ns}" rollout status deployment/tesk-api --timeout=180s > /dev/null
   kubectl -n "${ns}" port-forward service/pubgrade-sidecar "${port}:8080" > /dev/null &
   FORWARDS+=("$!")
   PORTS[${ns}]="${port}"
+  retry 30 1 "the port forward to ${ns}" \
+    curl --silent --fail --output /dev/null "http://127.0.0.1:${port}/ui/"
   port=$((port + 1))
 done
-for ns in "${NAMESPACES[@]}"; do
-  for _ in $(seq 1 30); do
-    if curl --silent --output /dev/null "http://127.0.0.1:${PORTS[${ns}]}/ui/"; then
-      break
-    fi
-    sleep 1
-  done
-done
-expect "site-b runs as the arbitrary user" "${ARBITRARY_UID} 0" \
-  "$(kubectl -n site-b exec deployment/pubgrade-sidecar -- sh -c 'echo "$(id -u) $(id -g)"')"
+# shellcheck disable=SC2016 # expanded in the container
+expect "site-b runs as the arbitrary user" "|${ARBITRARY_UID} 0|" \
+  "|$(kubectl -n site-b exec deployment/pubgrade-sidecar -- sh -c 'echo "$(id -u) $(id -g)"')|"
 
 for ns in "${NAMESPACES[@]}"; do
   echo "== notifications in ${ns}"
@@ -202,6 +230,8 @@ for ns in "${NAMESPACES[@]}"; do
   expect "status before" '"status":"complete"' "$(report "${ns}")"
   expect "other repository rejected" 409 \
     "$(notify "${ns}" tesk-api other/image "${NEW_TAG}")"
+  # Refused by the Role, whether the Deployment exists (site-a) or not (site-b):
+  # a wider Role would give 404 or 202
   expect "Deployment outside the Role refused" 403 \
     "$(notify "${ns}" bystander "${TARGET_REPO}" "${NEW_TAG}")"
   expect "notification accepted" 202 \
@@ -210,21 +240,13 @@ done
 
 for ns in "${NAMESPACES[@]}"; do
   echo "== rollout in ${ns}"
-  out=""
-  for _ in $(seq 1 60); do
-    out="$(report "${ns}")"
-    if [[ "$(jq -r .status <<< "${out}")" == complete \
-      && "$(jq -r .image <<< "${out}")" == *":${NEW_TAG}" ]]; then
-      break
-    fi
-    sleep 3
-  done
+  out="$(await_report "${ns}" \
+    ".status == \"complete\" and (.image | endswith(\":${NEW_TAG}\"))")"
   expect "status complete" '"status":"complete"' "${out}"
   expect "status reports the new image" ":${NEW_TAG}\"" \
     "$(jq --compact-output '{image}' <<< "${out}")"
   expect "status reports the requested image" ":${NEW_TAG}\"" \
     "$(jq --compact-output '{requested_image}' <<< "${out}")"
-  expect "Deployment has the new tag" ":${NEW_TAG}" "$(image_of "${ns}" tesk-api)"
 done
 # Exact matches, between `|`
 expect "site-a keeps the image without prefix" "|${TARGET_REPO}:${NEW_TAG}|" \
@@ -237,9 +259,17 @@ expect "bystander unchanged" "|${TARGET_REPO}:${OLD_TAG}|" \
 echo "== image that doesn't exist"
 expect "notification accepted" 202 \
   "$(notify site-a tesk-api "${TARGET_REPO}" "${MISSING_TAG}")"
+# The sidecar looks the tag up on Docker Hub at once, then retries every 30 s
+sleep 10
 expect "status waiting for the image" '"status":"waiting_for_image"' \
   "$(report site-a)"
-expect "Deployment unchanged" "|${TARGET_REPO}:${NEW_TAG}|" \
+expect "Deployment unchanged while waiting" "|${TARGET_REPO}:${NEW_TAG}|" \
+  "|$(image_of site-a tesk-api)|"
+# After the last try, about two minutes in
+out="$(await_report site-a '.status == "failed"')"
+expect "status failed" '"status":"failed"' "${out}"
+expect "failure explained" '"detail":"Image' "${out}"
+expect "Deployment unchanged after the failure" "|${TARGET_REPO}:${NEW_TAG}|" \
   "|$(image_of site-a tesk-api)|"
 
 if ((FAILED != 0)); then

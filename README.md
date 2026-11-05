@@ -161,8 +161,8 @@ tells the state of the deployment, so compare `image` with what was notified.
 
 CI (`.github/workflows/ci.yml`) checks the pull request title, runs the unit
 tests, builds and starts the image, lints and tests the chart and runs the
-integration test. To run the
-unit tests locally, with Python 3.9 (the version of the base image) and
+integration test. To run the unit tests locally, with Python 3.9 (the version
+of the base image) and
 [uv](https://docs.astral.sh/uv/) (pip 24.1 or newer rejects the metadata of a
 dependency of FOCA 0.12):
 
@@ -180,15 +180,19 @@ the image, starts k3s in a Docker container, installs the chart into two
 namespaces and checks that notifications roll the target Deployments out to
 the new tag and that the status reports it, with the chart's minimal Role, and
 in one namespace under an arbitrary user ID with group 0, as on OpenShift. It
-needs Docker (privileged containers), kubectl, Helm, curl, jq and access to
-Docker Hub, and removes everything it creates; kubectl and Helm use a
-kubeconfig of their own, so other clusters aren't touched:
+takes about five minutes and needs bash 4.4 or newer, Docker (privileged
+containers), kubectl, Helm, curl, jq and access to Docker Hub. At the end, it
+removes the cluster, with its volumes, and the image it built; kubectl and Helm
+use a kubeconfig of their own, so other clusters aren't touched:
 
 ```bash
 test/integration/k3s.sh
 ```
 
-`KEEP=1` keeps the cluster for debugging, and `API_PORT` and `FORWARD_PORT`
-change the local ports (16443, and 18080 and 18081).
+`K3S_IMAGE` sets the k3s image, and `API_PORT` and `FORWARD_PORT` the local
+ports (16443, and 18080 and 18081). `KEEP=1` keeps the cluster and the image
+for debugging; remove them afterwards with
+`docker rm -f -v pubgrade-sidecar-integration` and
+`docker rmi pubgrade-sidecar:integration`.
 
 [pubgrade]: <https://github.com/elixir-cloud-aai/Pubgrade>
