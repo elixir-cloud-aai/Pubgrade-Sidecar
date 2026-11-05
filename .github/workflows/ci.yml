@@ -91,7 +91,7 @@ jobs:
       - name: Build image
         run: docker build --tag pubgrade-sidecar:smoke .
       - name: Start app
-        run: docker run --detach --name sidecar --publish 8080:8080 pubgrade-sidecar:smoke
+        run: docker run --detach --name sidecar --publish 8080:8080 --env ACCESS_TOKEN=smoke pubgrade-sidecar:smoke
       - name: Check that app responds
         run: |
           curl --fail --silent --show-error --output /dev/null \
@@ -105,12 +105,11 @@ jobs:
             echo "::error::Expected status 401, got ${status}"
             exit 1
           fi
-      # The development token of `app/config/config.yaml`. Without a cluster, the
-      # call then fails, but it must have passed the token check
+      # Without a cluster, the call then fails, but it must have passed the check
       - name: Check that the configured token is accepted
         run: |
           status="$(curl --silent --show-error --output /dev/null \
-            --write-out '%{http_code}' --header 'X-Access-Token: Access@123' \
+            --write-out '%{http_code}' --header 'X-Access-Token: smoke' \
             "${API}/deployment/any")"
           if [ "${status}" != "404" ]; then
             echo "::error::Expected status 404, got ${status}"

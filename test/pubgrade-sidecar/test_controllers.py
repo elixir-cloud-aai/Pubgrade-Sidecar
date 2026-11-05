@@ -2,19 +2,11 @@ from unittest.mock import patch
 
 import pytest
 from flask import Flask
-from foca.models.config import Config
 from munch import DefaultMunch
 
 from pubgrade_sidecar.controllers import getDeployment, getImage, \
     deleteDeployment, updateDeployment, update_image
 from pubgrade_sidecar.errors.exceptions import Unauthorized, NotFound, DockerImageUnavailable
-
-ENDPOINT_CONFIG = {
-    "secrets":
-        {"access_token": "Access@123"}
-
-}
-
 
 class MockClass:
     pass
@@ -68,21 +60,40 @@ def mock_delete_namespaced_pod(self, deployment_name, namespace):
 
 @patch('kubernetes.client.AppsV1Api.list_namespaced_deployment', mock_list_namespaced_deployment)
 def test_get_deployments():
-    assert ['build-complete-updater', 'mongodb', 'pubgrade'] == getDeployment()
+    app = Flask(__name__)
+    with app.test_request_context('url', headers={'X-Access-Token':
+                                                      'test-token'}):
+        assert ['build-complete-updater', 'mongodb', 'pubgrade'] == getDeployment()
+
+
+def test_get_deployments_unauthorized():
+    app = Flask(__name__)
+    with app.test_request_context('url', headers={'X-Access-Token':
+                                                      'wrong_access_token'}):
+        with pytest.raises(Unauthorized):
+            getDeployment()
+
+
+@pytest.mark.parametrize('headers', [{}, {'X-Access-Token': ''},
+                                     {'X-Access-Token': 'test-token'}])
+def test_no_token_configured(monkeypatch, headers):
+    monkeypatch.delenv('ACCESS_TOKEN')
+    app = Flask(__name__)
+    with app.test_request_context('url', headers=headers):
+        with pytest.raises(Unauthorized):
+            getImage('pubgrade')
 
 
 @patch('kubernetes.client.AppsV1Api.read_namespaced_deployment', mock_read_namespaced_deployment)
 def test_get_image():
     app = Flask(__name__)
-    app.config.foca = Config(environments=ENDPOINT_CONFIG)
     with app.test_request_context('url', headers={'X-Access-Token':
-                                                      'Access@123'}):
+                                                      'test-token'}):
         assert 'akash7778/pubgrade:latest' == getImage('pubgrade')
 
 
 def test_get_image_unauthorized():
     app = Flask(__name__)
-    app.config.foca = Config(environments=ENDPOINT_CONFIG)
     with app.test_request_context('url', headers={'X-Access-Token':
                                                       'wrong_access_token'}):
         with pytest.raises(Unauthorized):
@@ -92,9 +103,8 @@ def test_get_image_unauthorized():
 @patch('kubernetes.client.AppsV1Api.read_namespaced_deployment', mock_read_namespaced_deployment_not_found)
 def test_get_image_not_found():
     app = Flask(__name__)
-    app.config.foca = Config(environments=ENDPOINT_CONFIG)
     with app.test_request_context('url', headers={'X-Access-Token':
-                                                      'Access@123'}):
+                                                      'test-token'}):
         with pytest.raises(NotFound):
             getImage('pubgrade')
 
@@ -102,15 +112,13 @@ def test_get_image_not_found():
 @patch('kubernetes.client.CoreV1Api.delete_namespaced_pod', mock_delete_namespaced_pod)
 def test_delete_deployment():
     app = Flask(__name__)
-    app.config.foca = Config(environments=ENDPOINT_CONFIG)
     with app.test_request_context('url', headers={'X-Access-Token':
-                                                      'Access@123'}):
+                                                      'test-token'}):
         assert "deleted: pubgrade" == deleteDeployment('pubgrade')
 
 
 def test_delete_deployment_unauthorized():
     app = Flask(__name__)
-    app.config.foca = Config(environments=ENDPOINT_CONFIG)
     with app.test_request_context('url', headers={'X-Access-Token':
                                                       'wrong_access_token'}):
         with pytest.raises(Unauthorized):
@@ -137,9 +145,8 @@ def mock_patch_namespaced_deployment(self, name, namespace, body):
 @patch('pubgrade_sidecar.controllers.check_docker_image_availability', return_value=True)
 def test_update_deployment(mock_controllers):
     app = Flask(__name__)
-    app.config.foca = Config(environments=ENDPOINT_CONFIG)
     with app.test_request_context('url', headers={
-        'X-Access-Token': 'Access@123'}, json={'image_name':
+        'X-Access-Token': 'test-token'}, json={'image_name':
                                                    'akash7778/pubgrade', 'tag': '1.0'}):
         response = updateDeployment('pubgrade')
         assert 'Updating image in progress...' == response.json["message"]

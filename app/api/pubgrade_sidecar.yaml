@@ -16,6 +16,13 @@ paths:
       operationId: getDeployment
       tags:
         - deployment
+      parameters:
+        - in: header
+          name: X-Access-Token
+          required: true
+          schema:
+            type: string
+          description: Secret used to identify source of request.
       responses:
         '200':
           description: 'List of available deployments'
