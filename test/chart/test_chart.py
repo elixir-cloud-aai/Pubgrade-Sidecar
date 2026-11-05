@@ -77,6 +77,7 @@ def render(*settings: str) -> Dict[str, Dict[str, Any]]:
             "not both",
         ),
         (REQUIRED + ["appName=Not_Valid"], "appName"),
+        (REQUIRED + ["appName=" + "a" * 64], "appName"),
         (REQUIRED[1:] + ["targetDeployments=tesk-api"], "targetDeployments"),
         (REQUIRED[1:] + ["targetDeployments[0]=123"], "targetDeployments"),
     ],

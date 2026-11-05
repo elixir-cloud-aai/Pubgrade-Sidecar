@@ -40,6 +40,9 @@ ID, so OpenShift's default security constraints apply.
    ```
 
    Without a Route or Ingress, the sidecar is only reachable in the cluster.
+   A Route redirects HTTP to HTTPS. With an Ingress, that depends on the
+   controller (ingress-nginx does it by default if TLS is set): check it, and
+   set `ingress.annotations` if needed, as every call carries the token.
 
 3. Install it:
 
@@ -50,7 +53,18 @@ ID, so OpenShift's default security constraints apply.
 The sidecar gets `get` and `patch` on the `targetDeployments` and nothing else.
 So with the chart, `GET /deployment` and `DELETE /deployment/{name}` are refused:
 they would need further rights, which you can add with a Role of your own.
+Kubernetes can't limit `patch` to one field, so these rights cover the whole of
+each listed Deployment, although the sidecar's API only changes the image tag.
+List only what the sidecar has to update, and add an admission policy in your
+cluster if you need a stricter limit.
 All values are described in `deployment/values.yaml`.
+
+To change the token, update the Secret and restart the sidecar, which reads the
+token at start:
+
+```bash
+kubectl -n production rollout restart deployment/pubgrade-sidecar
+```
 
 ### Upgrading from chart version 0.1
 

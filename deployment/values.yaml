@@ -30,7 +30,8 @@ route:
   enabled: false
   annotations: {}
 
-# Ingress with TLS, for clusters without Routes
+# Ingress with TLS, for clusters without Routes. Whether HTTP is redirected to
+# HTTPS depends on the controller: check it, and set an annotation if needed
 ingress:
   enabled: false
   className: ""
