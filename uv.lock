@@ -649,15 +649,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mock"
-version = "4.0.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e2/be/3ea39a8fd4ed3f9a25aae18a1bff2df7a610bca93c8ede7475e32d8b73a0/mock-4.0.3.tar.gz", hash = "sha256:7d3fbbde18228f4ff2f1f119a45cdffa458b4c0dee32eb4d2bb2f82554bac7bc", size = 72316, upload-time = "2020-12-10T07:33:13.043Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/03/b7e605db4a57c0f6fba744b11ef3ddf4ddebcada35022927a2b5fc623fdf/mock-4.0.3-py3-none-any.whl", hash = "sha256:122fcb64ee37cfad5b3f48d7a7d51875d7031aaf3d8be7c42e2bee25044eee62", size = 28536, upload-time = "2020-12-10T07:33:11.564Z" },
-]
-
-[[package]]
 name = "munch"
 version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -789,14 +780,14 @@ dependencies = [
     { name = "gitpython" },
     { name = "gunicorn" },
     { name = "kubernetes" },
-    { name = "mock" },
-    { name = "munch" },
+    { name = "requests" },
     { name = "setuptools" },
     { name = "yq" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "munch" },
     { name = "mypy" },
     { name = "pre-commit" },
     { name = "pytest" },
@@ -815,14 +806,14 @@ requires-dist = [
     { name = "gitpython", specifier = "~=3.1.18" },
     { name = "gunicorn", specifier = "==23.0.0" },
     { name = "kubernetes", specifier = "~=17.17.0" },
-    { name = "mock", specifier = "~=4.0.3" },
-    { name = "munch", specifier = "==4.0.0" },
+    { name = "requests", specifier = "==2.31.0" },
     { name = "setuptools", specifier = "==58.2.0" },
     { name = "yq", specifier = "~=2.12.2" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "munch", specifier = "==4.0.0" },
     { name = "mypy", specifier = ">=1.19" },
     { name = "pre-commit", specifier = ">=4.3" },
     { name = "pytest", specifier = ">=8.4" },

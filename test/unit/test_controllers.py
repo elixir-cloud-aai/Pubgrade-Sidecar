@@ -254,3 +254,5 @@ def test_update_deployment(mock_executor: MagicMock, mock_check: MagicMock) -> N
             == "Updating image in progress..."
         )
     mock_executor.submit.assert_called_once()
+    # The image is checked in the background only
+    mock_check.assert_not_called()

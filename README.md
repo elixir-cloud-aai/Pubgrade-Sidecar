@@ -188,6 +188,9 @@ uv run pre-commit install
 uv run pre-commit run --all-files
 ```
 
+The mypy hook runs the mypy of the environment, so activate it
+(`source .venv/bin/activate`) before committing.
+
 Dependabot proposes updates of the locked dependencies, the actions, the image
 of uv and the hooks. FOCA, and with it connexion and the base image, is updated
 by hand.
