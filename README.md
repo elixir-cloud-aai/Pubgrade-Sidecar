@@ -99,6 +99,11 @@ none                 targetDeployments, required
 All calls need the access token, which the sidecar takes from the environment
 variable `ACCESS_TOKEN`. Without that variable, it rejects all calls.
 
+The examples call the sidecar through its Route or Ingress, with TLS
+(`https://{sidecar-host}`, the `hostName` of the chart). Within the cluster,
+without a Route or Ingress, call its Service over plain HTTP instead, e.g.,
+`http://pubgrade-sidecar.{namespace}:8080`.
+
 Get the deployments in the namespace:
 
 ```bash
@@ -133,11 +138,13 @@ uses, like one pushed again, doesn't lead to a rollout.
 Status  Meaning
 200     The deployment already uses this image; nothing happens
 202     Accepted
-400     Invalid request, e.g., a missing token or an invalid tag
-401     Wrong token
+400     Invalid request, e.g., no `X-Access-Token` header or an invalid tag
+401     Wrong token, or no token configured in the sidecar
 403     The sidecar may not access this deployment
 404     Deployment not found
+405     Method not allowed
 409     Another image repository, or one not on Docker Hub; nothing changed
+415     Media type not supported
 500     The Kubernetes API failed; try again
 ```
 
