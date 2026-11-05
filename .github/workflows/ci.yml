@@ -73,7 +73,7 @@ jobs:
           uv pip install -r requirements.txt --group dev
           echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
       - name: Run unit tests
-        run: pytest --cov --cov-report=term-missing
+        run: pytest --cov --cov-report=term-missing --ignore=test/chart
 
   # Builds the image from the commit and starts it, without a cluster: the API
   # answers, and the access token is checked against the environment
@@ -143,12 +143,29 @@ jobs:
           version: v3.22.1
       - name: Lint chart
         run: |
-          helm lint deployment --strict
-          helm lint deployment --strict --set clusterType=kubernetes
-      - name: Render chart
+          required=(--set 'targetDeployments[0]=tesk-api'
+            --set accessToken.existingSecret=sidecar-token)
+          helm lint deployment --strict "${required[@]}"
+          helm lint deployment --strict "${required[@]}" \
+            --set route.enabled=true --set hostName=sidecar.example.org
+          helm lint deployment --strict "${required[@]}" \
+            --set ingress.enabled=true --set hostName=sidecar.example.org \
+            --set ingress.tlsSecretName=sidecar-tls
+      # As in `test`
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.12.13"
+      - name: Install dependencies
         run: |
-          helm template sidecar deployment > /dev/null
-          helm template sidecar deployment --set clusterType=kubernetes > /dev/null
+          uv venv --python 3.9
+          uv pip install -r requirements.txt --group dev
+          echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
+      # Fails instead of skipping the chart tests if Helm is missing
+      - name: Test chart
+        run: |
+          helm version
+          pytest test/chart
 
   # The only check to require: passes if every other job passed, or was skipped
   # where that is intended (`title` on pushes and for Dependabot). Any other

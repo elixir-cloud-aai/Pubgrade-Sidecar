@@ -10,12 +10,79 @@ updates at pubgrade) in cloud native infrastructure at deployment side.
 
 ## Installation
 
-1. Install and setup Kubernetes.
-2. Install Helm.
-3. Modify deployment/values.yaml.
-4. Create a namespace, e.g., with kubectl create namespace production
-5. Create a deployment using Helm with 
-  `helm install pubgrade-sidecar deployment/ -n production`
+The chart in `deployment/` installs the sidecar into the namespace of the
+Deployments to upgrade, on Kubernetes and on OpenShift. It needs no fixed user
+ID, so OpenShift's default security constraints apply.
+
+1. Create a Secret with a token of its own for this site:
+
+   ```bash
+   kubectl -n production create secret generic pubgrade-sidecar \
+     --from-literal=access-token="$(openssl rand -hex 32)"
+   ```
+
+2. Write the values, e.g., `my-values.yaml`:
+
+   ```yaml
+   targetDeployments:
+     - tesk-api
+   accessToken:
+     existingSecret: pubgrade-sidecar
+   hostName: sidecar.example.org
+   # On OpenShift:
+   route:
+     enabled: true
+   # Elsewhere, instead:
+   # ingress:
+   #   enabled: true
+   #   className: nginx
+   #   tlsSecretName: sidecar-tls
+   ```
+
+   Without a Route or Ingress, the sidecar is only reachable in the cluster.
+   A Route redirects HTTP to HTTPS. With an Ingress, that depends on the
+   controller (ingress-nginx does it by default if TLS is set): check it, and
+   set `ingress.annotations` if needed, as every call carries the token.
+
+3. Install it:
+
+   ```bash
+   helm install pubgrade-sidecar deployment/ -n production -f my-values.yaml
+   ```
+
+The sidecar gets `get` and `patch` on the `targetDeployments` and nothing else.
+So with the chart, `GET /deployment` and `DELETE /deployment/{name}` are refused:
+they would need further rights, which you can add with a Role of your own.
+Kubernetes can't limit `patch` to one field, so these rights cover the whole of
+each listed Deployment, although the sidecar's API only changes the image tag.
+List only what the sidecar has to update, and add an admission policy in your
+cluster if you need a stricter limit.
+All values are described in `deployment/values.yaml`.
+
+To change the token, update the Secret and restart the sidecar, which reads the
+token at start:
+
+```bash
+kubectl -n production rollout restart deployment/pubgrade-sidecar
+```
+
+### Upgrading from chart version 0.1
+
+Uninstall the old release first (`helm uninstall`), then install as above:
+Kubernetes doesn't allow changing the role of an existing RoleBinding, so
+`helm upgrade` fails. The values changed:
+
+```text
+Old                  New
+appname              appName
+imagename            image.repository, image.tag
+serviceaccountname   appName
+containerport        service.port
+secret               accessToken.existingSecret, a Secret that you create
+clusterType          route.enabled or ingress.enabled
+nodeport             none
+none                 targetDeployments, required
+```
 
 ## Usage
 
@@ -93,7 +160,7 @@ tells the state of the deployment, so compare `image` with what was notified.
 ## Development
 
 CI (`.github/workflows/ci.yml`) checks the pull request title, runs the unit
-tests, builds and starts the image and lints and renders the chart. To run the
+tests, builds and starts the image and lints and tests the chart. To run the
 unit tests locally, with Python 3.9 (the version of the base image) and
 [uv](https://docs.astral.sh/uv/) (pip 24.1 or newer rejects the metadata of a
 dependency of FOCA 0.12):
@@ -104,6 +171,7 @@ uv pip install -r requirements.txt --group dev
 uv run --no-project pytest --cov
 ```
 
-They need neither a cluster nor a Kubernetes configuration.
+They need neither a cluster nor a Kubernetes configuration. The chart tests in
+`test/chart` run if Helm is installed.
 
 [pubgrade]: <https://github.com/elixir-cloud-aai/Pubgrade>

@@ -1,7 +1,51 @@
-serviceaccountname: pod-executer
-appname: pubgrade-sidecar
-imagename: akash7778/pubgrade_sidecar:0.1
-containerport: 8080
-nodeport: 30003
-secret: Akash@123
-clusterType: "openshift"
+# Name of the Deployment, Service and other resources
+appName: pubgrade-sidecar
+
+image:
+  repository: elixircloud/pubgrade-sidecar
+  # Better a dated tag, so that the version doesn't change by itself. Quote it if
+  # it looks like a number
+  tag: latest
+  pullPolicy: Always
+
+# Required: names of the Deployments in this namespace that the sidecar may
+# upgrade. It gets `get` and `patch` on these only
+targetDeployments: []
+
+# Required: an existing Secret with the access token, which callers send as
+# `X-Access-Token`. Create it yourself, so that the token stays out of values
+# files, e.g.:
+#   kubectl create secret generic pubgrade-sidecar \
+#     --from-literal=access-token="$(openssl rand -hex 32)"
+accessToken:
+  existingSecret: ""
+  key: access-token
+
+# Host name of the Route or Ingress
+hostName: ""
+
+# OpenShift Route with TLS terminated at the router, which redirects HTTP to
+# HTTPS. Without a Route or Ingress, the sidecar is only reachable in the cluster
+route:
+  enabled: false
+  annotations: {}
+
+# Ingress with TLS, for clusters without Routes. Whether HTTP is redirected to
+# HTTPS depends on the controller: check it, and set an annotation if needed
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Required if enabled: the Secret with the certificate (cert-manager can create
+  # it, by annotations)
+  tlsSecretName: ""
+
+service:
+  port: 8080
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
