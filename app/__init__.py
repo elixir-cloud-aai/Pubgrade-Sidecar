@@ -1,1 +1,1 @@
-__version__ = "0.1.0"
+"""Pubgrade sidecar, run from this directory (`app.py`)."""

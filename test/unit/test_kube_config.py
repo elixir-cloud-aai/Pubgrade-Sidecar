@@ -2,8 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from kubernetes import config
+import pytest
 
 from pubgrade_sidecar.controllers import _load_kube_config
 

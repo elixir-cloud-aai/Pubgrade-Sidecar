@@ -1,13 +1,14 @@
 """Tests for the responses of the API, through the app as FOCA creates it."""
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
-import pytest
 from foca import Foca
 from kubernetes.client.rest import ApiException
 from munch import DefaultMunch
+import pytest
 
 from pubgrade_sidecar import controllers
 
@@ -69,21 +70,25 @@ def deployment(image: str) -> DefaultMunch:
         ({"method": "GET", "headers": {"X-Access-Token": "wrong"}}, 401),
         ({"method": "PUT", "headers": {"X-Access-Token": "wrong"}, "json": BODY}, 401),
         ({"method": "PUT", "headers": TOKEN, "json": {}}, 400),
-        ({"method": "PUT", "headers": TOKEN, "data": "x", "content_type": "text/plain"}, 415),
+        (
+            {
+                "method": "PUT",
+                "headers": TOKEN,
+                "data": "x",
+                "content_type": "text/plain",
+            },
+            415,
+        ),
         ({"method": "POST", "headers": TOKEN}, 405),
     ],
 )
-def test_client_errors(
-    client: Any, request_args: Dict[str, Any], code: int
-) -> None:
+def test_client_errors(client: Any, request_args: dict[str, Any], code: int) -> None:
     """Test that wrong requests get the status code for client errors."""
     with patch(READ, return_value=deployment("elixircloud/tesk-api:1.1.0")):
         assert client.open(URL, **request_args).status_code == code
 
 
-@pytest.mark.parametrize(
-    "status,code", [(404, 404), (403, 403), (503, 500)]
-)
+@pytest.mark.parametrize("status,code", [(404, 404), (403, 403), (503, 500)])
 def test_kubernetes_errors(client: Any, status: int, code: int) -> None:
     """Test that only a missing deployment or right is a client error."""
     with patch(READ, side_effect=ApiException(status=status)):
@@ -121,7 +126,7 @@ def test_notification_rejected(client: Any, image: str) -> None:
     with patch(READ, return_value=deployment(image)):
         response = client.put(URL, headers=TOKEN, json=BODY)
     assert response.status_code == 409
-    controllers._executor.submit.assert_not_called()
+    cast(MagicMock, controllers._executor).submit.assert_not_called()
 
 
 def test_notification_for_other_registry(client: Any) -> None:
@@ -133,7 +138,7 @@ def test_notification_for_other_registry(client: Any) -> None:
         )
     assert response.status_code == 409
     assert "Docker Hub" in response.json["msg"]
-    controllers._executor.submit.assert_not_called()
+    cast(MagicMock, controllers._executor).submit.assert_not_called()
 
 
 def test_status_report(client: Any) -> None:

@@ -1,26 +1,36 @@
+"""Errors of the API and the responses that FOCA returns for them."""
+
 from connexion.exceptions import (
     BadRequestProblem,
     ExtraParameterProblem,
     UnsupportedMediaTypeProblem,
 )
 from werkzeug.exceptions import (
-    BadRequest, Conflict, Forbidden, MethodNotAllowed, NotFound, Unauthorized,
+    BadRequest,
+    Conflict,
+    Forbidden,
     InternalServerError,
+    MethodNotAllowed,
+    NotFound,
+    Unauthorized,
 )
 
 
 class DockerImageUnavailable(NotFound):
     """Raised when object with given image is not found."""
+
     pass
 
 
 class ImageRepositoryMismatch(Conflict):
     """Raised when a notification is for another image repository."""
+
     pass
 
 
 class ImageRegistryUnsupported(Conflict):
     """Raised when a notification is for an image that isn't on Docker Hub."""
+
     pass
 
 
@@ -69,7 +79,6 @@ exceptions = {
         "msg": "An unexpected error occurred",
         "status_code": "500",
     },
-
     NotFound: {
         "msg": "The requested resource wasn't found.",
         "status_code": "404",
