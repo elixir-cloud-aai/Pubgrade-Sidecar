@@ -250,13 +250,18 @@ done
 
 for ns in "${NAMESPACES[@]}"; do
   echo "== rollout in ${ns}"
+  # The image as the Deployment spells it (exact matches, between `|`)
+  want="${TARGET_REPO}:${NEW_TAG}"
+  if [[ "${ns}" == site-b ]]; then
+    want="docker.io/${want}"
+  fi
   out="$(await_report "${ns}" \
-    ".status == \"complete\" and (.image | endswith(\":${NEW_TAG}\"))")"
+    ".status == \"complete\" and .image == \"${want}\"")"
   expect "status complete" '"status":"complete"' "${out}"
-  expect "status reports the new image" ":${NEW_TAG}\"" \
-    "$(jq --compact-output '{image}' <<< "${out}")"
-  expect "status reports the requested image" ":${NEW_TAG}\"" \
-    "$(jq --compact-output '{requested_image}' <<< "${out}")"
+  expect "status reports the new image" "|${want}|" \
+    "|$(jq --raw-output .image <<< "${out}")|"
+  expect "status reports the requested image" "|${want}|" \
+    "|$(jq --raw-output .requested_image <<< "${out}")|"
 done
 # Exact matches, between `|`
 expect "site-a keeps the image without prefix" "|${TARGET_REPO}:${NEW_TAG}|" \
@@ -278,7 +283,10 @@ expect "Deployment unchanged while waiting" "|${TARGET_REPO}:${NEW_TAG}|" \
 # After the last try, about 90 s in
 out="$(await_report site-a '.status == "failed"')"
 expect "status failed" '"status":"failed"' "${out}"
-expect "failure explained" '"detail":"Image' "${out}"
+# The sidecar's explanation of a missing image
+expect "failure explained" \
+  '|Image not available, or Docker Hub not reachable.|' \
+  "|$(jq --raw-output .detail <<< "${out}")|"
 expect "Deployment unchanged after the failure" "|${TARGET_REPO}:${NEW_TAG}|" \
   "|$(image_of site-a tesk-api)|"
 
