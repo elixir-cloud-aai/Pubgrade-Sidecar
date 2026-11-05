@@ -1,10 +1,9 @@
 # Everything that must pass on pull requests and pushes to `master`: the pull
 # request title, the unit tests, the image, the chart, and the image and chart
-# together on a real cluster. The gate
-# `passed` ("CI passed") is the only check to require. No `paths:` filters, so
-# that the gate always reports; skip jobs with `if:` instead (and allow the
-# skip in the gate). Runs also when a pull request is edited, so that the title
-# check follows the title
+# together on a real cluster. The gate `passed` ("CI passed") is the only
+# check to require. No `paths:` filters, so that the gate always reports; skip
+# jobs with `if:` instead (and allow the skip in the gate). Runs also when a
+# pull request is edited, so that the title check follows the title
 
 name: CI
 on:

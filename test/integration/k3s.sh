@@ -47,6 +47,8 @@ FAILED=0
 
 cleanup() {
   local status=$?
+  # Not cut short by a further signal
+  trap '' INT TERM
   if ((status != 0 || FAILED != 0)) && [[ -s "${KUBECONFIG}" ]]; then
     echo "== diagnostics"
     for ns in "${NAMESPACES[@]}"; do
@@ -74,7 +76,7 @@ trap 'exit 143' TERM
 # Runs a command until it succeeds, at most a number of times with a delay in
 # seconds; fails with a message if it never does
 retry() {
-  local tries="$1" delay="$2" what="$3"
+  local tries="$1" delay="$2" what="$3" i
   shift 3
   for ((i = 1; i <= tries; i++)); do
     if "$@" > /dev/null 2>&1; then
@@ -102,7 +104,9 @@ expect() {
 # status code to stdout
 call() {
   local ns="$1" method="$2" path="$3" token="$4" body="${5:-}"
-  local args=(--silent --show-error --output "${WORK}/body"
+  # No stale body of an earlier call, if this one fails
+  rm -f "${WORK}/body"
+  local args=(--silent --show-error --max-time 15 --output "${WORK}/body"
     --write-out '%{http_code}' --request "${method}"
     --header "X-Access-Token: ${token}")
   if [[ -n "${body}" ]]; then
@@ -145,6 +149,11 @@ image_of() {
     -o jsonpath='{.spec.template.spec.containers[0].image}'
 }
 
+# Whether the cluster has registered its node
+node_registered() {
+  [[ -n "$(kubectl get nodes --no-headers 2> /dev/null)" ]]
+}
+
 # Whether a namespace has exactly one sidecar pod, e.g., after a rollout, once
 # the old pod is gone
 one_sidecar_pod() {
@@ -163,7 +172,7 @@ retry 60 2 "the kubeconfig" docker exec "${NAME}" test -s /etc/rancher/k3s/k3s.y
 docker exec "${NAME}" cat /etc/rancher/k3s/k3s.yaml \
   | sed "s#https://127.0.0.1:6443#https://127.0.0.1:${API_PORT}#" > "${KUBECONFIG}"
 chmod 600 "${KUBECONFIG}"
-retry 60 2 "the node" kubectl get nodes --no-headers
+retry 60 2 "the node" node_registered
 kubectl wait --for=condition=Ready node --all --timeout=120s > /dev/null
 # The sidecar resolves Docker Hub, so DNS must be up
 retry 60 2 "CoreDNS" kubectl -n kube-system get deployment coredns
@@ -217,7 +226,8 @@ for ns in "${NAMESPACES[@]}"; do
   FORWARDS+=("$!")
   PORTS[${ns}]="${port}"
   retry 30 1 "the port forward to ${ns}" \
-    curl --silent --fail --output /dev/null "http://127.0.0.1:${port}/ui/"
+    curl --silent --fail --max-time 5 --output /dev/null \
+    "http://127.0.0.1:${port}/ui/"
   port=$((port + 1))
 done
 # shellcheck disable=SC2016 # expanded in the container
@@ -265,7 +275,7 @@ expect "status waiting for the image" '"status":"waiting_for_image"' \
   "$(report site-a)"
 expect "Deployment unchanged while waiting" "|${TARGET_REPO}:${NEW_TAG}|" \
   "|$(image_of site-a tesk-api)|"
-# After the last try, about two minutes in
+# After the last try, about 90 s in
 out="$(await_report site-a '.status == "failed"')"
 expect "status failed" '"status":"failed"' "${out}"
 expect "failure explained" '"detail":"Image' "${out}"
