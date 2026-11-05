@@ -40,6 +40,7 @@ def deployment(
     total_replicas: int = 1,
     available_replicas: int = 1,
     conditions: Optional[List[Dict[str, str]]] = None,
+    uid: str = "uid-1",
 ) -> DefaultMunch:
     """Build a Deployment as returned by the Kubernetes client.
 
@@ -52,13 +53,14 @@ def deployment(
         total_replicas: Existing replicas.
         available_replicas: Available replicas.
         conditions: Conditions of the Deployment.
+        uid: Identifier of the Deployment.
 
     Returns:
         Object with the attributes used by the controllers.
     """
     return DefaultMunch.fromDict(
         {
-            "metadata": {"generation": generation},
+            "metadata": {"generation": generation, "uid": uid},
             "spec": {
                 "replicas": replicas,
                 "template": {"spec": {"containers": [{"image": image}]}},
@@ -286,7 +288,7 @@ def test_image_never_available(
     result = status(app)
     assert result["status"] == "failed"
     assert result["requested_image"] == "elixircloud/tesk-api:1.2.0"
-    assert result["detail"] == "Image not available."
+    assert "Image not available" in result["detail"]
 
 
 @patch(PATCH, side_effect=RuntimeError("secret detail"))
@@ -418,6 +420,43 @@ def test_status_after_patch_follows_deployment(
     # A rollback by hand: a poller must not wait for ever
     mock_read.return_value = deployment(generation=5, observed_generation=5)
     assert status(app)["status"] == "complete"
+    # The same for a Deployment that was recreated, with a new generation count
+    mock_read.return_value = deployment(
+        generation=1, observed_generation=1, uid="uid-2"
+    )
+    assert status(app)["status"] == "complete"
+
+
+@pytest.mark.parametrize(
+    "current,tag",
+    [
+        ("elixircloud/tesk-api", "latest"),
+        ("elixircloud/tesk-api:1.2.0@sha256:abc", "1.2.0"),
+    ],
+)
+@patch(PATCH)
+@patch(READ)
+def test_notify_same_effective_tag(
+    mock_read: MagicMock,
+    mock_patch: MagicMock,
+    app: Flask,
+    current: str,
+    tag: str,
+) -> None:
+    """Test that untagged images and digests are no reason for a rollout."""
+    mock_read.return_value = deployment(image=current)
+    response, code = notify(app, "elixircloud/tesk-api", tag=tag)
+    assert code == 200
+    assert response.json["image"] == current
+    mock_patch.assert_not_called()
+
+
+@patch(READ, side_effect=RuntimeError("no cluster"))
+def test_notify_invalid_tag_needs_no_cluster(mock_read: MagicMock, app: Flask) -> None:
+    """Test that an invalid tag is rejected before Kubernetes is asked."""
+    with pytest.raises(BadRequest):
+        notify(app, "elixircloud/tesk-api", tag="a/b")
+    mock_read.assert_not_called()
 
 
 @patch(PATCH)

@@ -50,7 +50,7 @@ curl --location --request PUT 'http://{pubgrade_sidecar-url}/deployment/
 A notification returns at once, with status 202; the rollout runs in the
 background. Only the tag can change, and `docker.io/<repository>` and
 `<repository>` count as the same repository. The sidecar waits for the image
-on Docker Hub, about 90 seconds at most, so only images hosted there can be
+on Docker Hub, about two minutes at most, so only images hosted there can be
 rolled out. Use a new tag for every release: a tag that the deployment already
 uses, like one pushed again, doesn't lead to a rollout.
 
@@ -66,7 +66,8 @@ Status  Meaning
 500     The Kubernetes API failed; try again
 ```
 
-The `GET` call above reports the state of the delivery:
+The `GET` call above reports the state of the delivery. Since version 2.0.0 of
+the API, it returns this object instead of only the image:
 
 ```json
 {

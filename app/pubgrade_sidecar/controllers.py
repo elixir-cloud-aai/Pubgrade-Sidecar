@@ -70,12 +70,14 @@ class _Delivery:
         state: `waiting_for_image`, `patched` or `failed`.
         detail: Explanation of a failure.
         generation: Generation of the Deployment that the patch resulted in.
+        uid: Identifier of the Deployment that was patched.
     """
 
     image: str
     state: str = "waiting_for_image"
     detail: Optional[str] = None
     generation: int = 0
+    uid: Optional[str] = None
 
 
 # The last delivery per deployment, in memory: the sidecar has one replica. A
@@ -251,6 +253,7 @@ def getImage(deployment_name: str):
         state = delivery.state if delivery else None
         detail = delivery.detail if delivery else None
         generation = delivery.generation if delivery else 0
+        uid = delivery.uid if delivery else None
     deployment, image = _read_deployment(deployment_name)
     result = {
         "image": image,
@@ -262,9 +265,12 @@ def getImage(deployment_name: str):
     if delivery is not None:
         result["requested_image"] = delivery.image
         # What the Deployment says counts once it has the requested image, or
-        # once it has moved past the patch, e.g., by a rollback
+        # once it has moved past the patch, e.g., by a rollback, or was recreated
         if state == "patched":
-            if deployment.metadata.generation < generation:
+            if (
+                deployment.metadata.uid == uid
+                and deployment.metadata.generation < generation
+            ):
                 result["status"] = "rolling_out"
         elif delivery.image != image:
             result["status"] = state
@@ -306,11 +312,11 @@ def updateDeployment(deployment_name: str):
         ImageRegistryUnsupported: If the image isn't on Docker Hub.
     """
     _check_token()
-    _, old_image = _read_deployment(deployment_name)
-
     image_tag = request.json["tag"]
     if not VALID_TAG.fullmatch(image_tag):
         raise BadRequest
+    _, old_image = _read_deployment(deployment_name)
+
     image_repo = _parse_image(request.json["image_name"])[0]
     old_repo, old_tag = _parse_image(old_image)
     if old_repo != image_repo:
@@ -318,17 +324,19 @@ def updateDeployment(deployment_name: str):
     if not _is_on_docker_hub(image_repo):
         raise ImageRegistryUnsupported
 
+    # An image without a tag means `latest`, and one with a digest stays as it is
+    if (old_tag or "latest") == image_tag:
+        with _lock:
+            _deliveries.pop(deployment_name, None)
+        return jsonify(
+            {"message": "Deployment already uses this image.", "image": old_image}
+        ), 200
+
     # Keeps the deployment's spelling of the repository, so only the tag changes
     image = old_image.split("@")[0]
     if old_tag is not None:
         image = image.rsplit(":", 1)[0]
     image = f"{image}:{image_tag}"
-    if image == old_image:
-        with _lock:
-            _deliveries.pop(deployment_name, None)
-        return jsonify(
-            {"message": "Deployment already uses this image.", "image": image}
-        ), 200
     patch = [
         {
             "op": "replace",
@@ -394,9 +402,10 @@ def _deliver(
         with _lock:
             delivery.state = "patched"
             delivery.generation = patched.metadata.generation
+            delivery.uid = patched.metadata.uid
     except DockerImageUnavailable:
         logger.warning("Image of a notification isn't available.")
-        _fail(delivery, "Image not available.")
+        _fail(delivery, "Image not available, or Docker Hub not reachable.")
     except Exception:
         logger.exception("Deployment could not be updated.")
         _fail(delivery, "Deployment could not be updated.")
