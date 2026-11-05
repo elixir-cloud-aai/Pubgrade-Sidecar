@@ -28,7 +28,7 @@ variable `ACCESS_TOKEN`. Without that variable, it rejects all calls.
  --header 'X-Access-Token: {access-token}'
  ```
 
-- Get current image of the deployment.
+- Get the image and the rollout status of the deployment.
 ```bash
 curl --location --request GET 'http://{pubgrade_sidecar-url}/deployment/
 {deployment-name}' \
@@ -42,10 +42,52 @@ curl --location --request PUT 'http://{pubgrade_sidecar-url}/deployment/
 --header 'X-Access-Token: {access-token}' \
 --header 'Content-Type: application/json' \
 --data-raw '{
-    "image_name": "akash7778/pubgrade",
-    "tag": "latest"
+    "image_name": "elixircloud/tesk-api",
+    "tag": "1.2.0"
 }'
 ```
+
+A notification returns at once, with status 202; the rollout runs in the
+background. Only the tag can change, and `docker.io/<repository>` and
+`<repository>` count as the same repository. The sidecar waits for the image
+on Docker Hub, about 90 seconds at most, so only images hosted there can be
+rolled out. Use a new tag for every release: a tag that the deployment already
+uses, like one pushed again, doesn't lead to a rollout.
+
+```text
+Status  Meaning
+200     The deployment already uses this image; nothing happens
+202     Accepted
+400     Invalid request, e.g., a missing token or an invalid tag
+401     Wrong token
+403     The sidecar may not access this deployment
+404     Deployment not found
+409     Another image repository, or one not on Docker Hub; nothing changed
+500     The Kubernetes API failed; try again
+```
+
+The `GET` call above reports the state of the delivery:
+
+```json
+{
+  "image": "elixircloud/tesk-api:1.2.0",
+  "status": "complete",
+  "replicas": 1,
+  "updated_replicas": 1,
+  "available_replicas": 1,
+  "requested_image": "elixircloud/tesk-api:1.2.0"
+}
+```
+
+`status` is `waiting_for_image`, `rolling_out`, `complete` or `failed` (with
+an explanation in `detail`). A failure counts until the deployment has the
+requested image, and a change of the deployment after a rollout, e.g., a
+rollback, counts over the last notification. A newer notification replaces one that still waits for its
+image.
+
+`requested_image` and `detail` are kept in memory: a restart loses a notification
+that is still waiting for its image, without a report. Afterwards, `status` only
+tells the state of the deployment, so compare `image` with what was notified.
 
 ## Development
 
