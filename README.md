@@ -178,8 +178,8 @@ tells the state of the deployment, so compare `image` with what was notified.
 <!-- --8<-- [start:development] -->
 CI (`.github/workflows/ci.yml`) checks the pull request title, runs the linters
 and type checks, runs the unit tests with their coverage, builds and starts the
-image, scans it for known vulnerabilities, lints and tests the chart and
-builds the documentation.
+image, scans it for known vulnerabilities, lints and tests the chart, runs the
+integration test and builds the documentation.
 
 Dependencies are declared in `pyproject.toml` and locked, with their hashes, in
 `uv.lock`; the image installs exactly the locked runtime dependencies. Use
@@ -196,6 +196,26 @@ They need neither a cluster nor a Kubernetes configuration, and fail below 100%
 coverage. The chart tests in `test/chart` run if Helm is installed. After
 changing dependencies in `pyproject.toml`, update the lock with `uv lock`; CI
 fails if it doesn't match.
+
+The integration test runs the sidecar on a real, throw-away cluster: it builds
+the image, starts k3s in a Docker container, installs the chart into two
+namespaces and checks that notifications roll the target Deployments out to
+the new tag and that the status reports it, with the chart's minimal Role, and
+in one namespace under an arbitrary user ID with group 0, as on OpenShift. It
+takes about five minutes and needs bash 4.4 or newer, Docker (privileged
+containers), kubectl, Helm, curl, jq and access to Docker Hub. At the end, it
+removes the cluster, with its volumes, and the image it built; kubectl and Helm
+use a kubeconfig of their own, so other clusters aren't touched:
+
+```bash
+test/integration/k3s.sh
+```
+
+`K3S_IMAGE` sets the k3s image, and `API_PORT` and `FORWARD_PORT` the local
+ports (16443, and 18080 and 18081). `KEEP=1` keeps the cluster and the image
+for debugging; remove them afterwards with
+`docker rm -f -v pubgrade-sidecar-integration` and
+`docker rmi pubgrade-sidecar:integration`.
 
 Linters (ruff), type checks (mypy) and the secret scan (gitleaks) run with
 [pre-commit](https://pre-commit.com/), on every commit once installed, and in
