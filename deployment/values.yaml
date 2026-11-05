@@ -3,7 +3,7 @@ appName: pubgrade-sidecar
 
 image:
   repository: elixircloud/pubgrade-sidecar
-  # For a deployment better `sha-<commit>`, the only tag that never changes
+  # For a deployment better `sha-<commit>`, the only tag that stays on one commit
   tag: latest
   pullPolicy: Always
 
