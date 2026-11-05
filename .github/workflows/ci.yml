@@ -105,6 +105,17 @@ jobs:
             echo "::error::Expected status 401, got ${status}"
             exit 1
           fi
+      # The development token of `app/config/config.yaml`. Without a cluster, the
+      # call then fails, but it must have passed the token check
+      - name: Check that the configured token is accepted
+        run: |
+          status="$(curl --silent --show-error --output /dev/null \
+            --write-out '%{http_code}' --header 'X-Access-Token: Access@123' \
+            "${API}/deployment/any")"
+          if [ "${status}" != "404" ]; then
+            echo "::error::Expected status 404, got ${status}"
+            exit 1
+          fi
       - name: Show app logs
         if: failure()
         run: docker logs sidecar

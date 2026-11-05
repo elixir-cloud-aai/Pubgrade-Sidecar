@@ -46,8 +46,8 @@ curl --location --request PUT 'http://{pubgrade_sidecar-url}/deployment/
 ## Development
 
 CI (`.github/workflows/ci.yml`) checks the pull request title, runs the unit
-tests, builds and starts the image and lints and renders the chart. To run the unit tests
-locally, with Python 3.9 (the version of the base image) and
+tests, builds and starts the image and lints and renders the chart. To run the
+unit tests locally, with Python 3.9 (the version of the base image) and
 [uv](https://docs.astral.sh/uv/) (pip 24.1 or newer rejects the metadata of a
 dependency of FOCA 0.12):
 
