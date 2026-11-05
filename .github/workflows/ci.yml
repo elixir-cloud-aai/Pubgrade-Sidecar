@@ -1,6 +1,7 @@
 # Everything that must pass on pull requests and pushes to `master`: the pull
-# request title, the unit tests, the image and the chart. The gate
-# `passed` ("CI passed") is the only check to require. No `paths:` filters, so
+# request title, the unit tests, the image, the chart, and both on a real
+# cluster. The gate `passed` ("CI passed") is the only check to require. No
+# `paths:` filters, so
 # that the gate always reports; skip jobs with `if:` instead (and allow the
 # skip in the gate). Runs also when a pull request is edited, so that the title
 # check follows the title
@@ -127,6 +128,30 @@ jobs:
         if: failure()
         run: docker logs sidecar
 
+  # Builds the image from the commit and installs the chart on a throw-away k3s
+  # cluster, in two namespaces (one with an arbitrary user ID, as on
+  # OpenShift): notifications roll the target Deployments out to the new tag,
+  # and the status reports it (`test/integration/k3s.sh`). Needs Docker Hub,
+  # for the target images and the sidecar's check of the tags
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # As in `chart`; kubectl, curl and jq come with the runner
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.22.1
+      - name: Run integration test
+        run: |
+          kubectl version --client
+          test/integration/k3s.sh
+
   chart:
     name: Chart
     runs-on: ubuntu-latest
@@ -175,7 +200,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [title, test, smoke, chart]
+    needs: [title, test, smoke, integration, chart]
     permissions: {}
     steps:
       - name: Check results of all jobs
