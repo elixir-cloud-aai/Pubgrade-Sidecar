@@ -8,6 +8,9 @@
 **/__pycache__
 **/*.py[cod]
 **/*.egg-info
+# Written by the app next to the API spec at startup, also by local test runs; a
+# copy in the image couldn't be overwritten by the user that OpenShift assigns
+**/*.modified.yaml
 # Local secrets (e.g., `.env`, `.env.local`) must never reach the build, also
 # not within the included paths
 **/.env*
