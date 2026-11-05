@@ -1,0 +1,27 @@
+{{- if and .Values.route.enabled .Values.ingress.enabled }}
+{{- fail "enable either route or ingress, not both" }}
+{{- end }}
+{{- if .Values.route.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ .Values.appName }}
+  labels:
+    app: {{ .Values.appName }}
+  {{- with .Values.route.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  host: {{ required "hostName must be set if route.enabled" .Values.hostName | quote }}
+  port:
+    targetPort: http
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
+  to:
+    kind: Service
+    name: {{ .Values.appName }}
+    weight: 100
+  wildcardPolicy: None
+{{- end }}
