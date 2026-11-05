@@ -1,9 +1,134 @@
-[dependency-groups]
-dev = [
-    "pytest==8.4.2",
-    "pytest-cov==7.1.0",
-    "pyyaml",
+[project]
+name = "pubgrade-sidecar"
+version = "0.1.0"
+description = "Updates the image tags of Kubernetes Deployments when Pubgrade notifies it"
+authors = [
+    {name = "ELIXIR On-Cloud", email = "cloud-service@elixir-europe.org"},
 ]
+license = "Apache-2.0"
+readme = "README.md"
+keywords = [
+    "pubgrade", "sidecar", "kubernetes", "deployment", "upgrade", "elixir",
+    "cloud", "ci-cd", "api", "openapi", "flask", "python",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Information Technology",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+]
+# The Python version of the base image in the `Dockerfile`, the only one the
+# app runs on, so that the lock resolves for it alone
+requires-python = "==3.9.*"
+# The runtime dependencies, installed into the image from the lock
+# (`Dockerfile`). FOCA, and with it the base image, is bumped by hand
+# (`.github/dependabot.yml`)
+dependencies = [
+    "connexion==2.14.2",
+    "foca==0.12.1",
+    "gitpython~=3.1.18",
+    "gunicorn==23.0.0",
+    "kubernetes~=17.17.0",
+    "mock~=4.0.3",
+    "munch==4.0.0",
+    "setuptools==58.2.0",
+    "yq~=2.12.2",
+]
+
+[project.urls]
+homepage = "https://github.com/elixir-cloud-aai/Pubgrade-Sidecar"
+
+[dependency-groups]
+# Tests, linters and type checks; local hooks of `.pre-commit-config.yaml` use
+# these too. `uv sync` installs them by default; the image build leaves them
+# out (`--no-dev`)
+dev = [
+    "mypy>=1.19",
+    "pre-commit>=4.3",
+    "pytest>=8.4",
+    "pytest-cov>=7.0",
+    "pyyaml>=6.0",
+    "ruff>=0.14",
+    "types-PyYAML>=6.0.12",
+    "types-requests>=2.32",
+    # Locks the dependencies of the image (`uv lock`, checked in CI); also the
+    # version of uv that CI installs (`astral-sh/setup-uv`)
+    "uv>=0.13",
+]
+
+[tool.uv]
+# The app runs from its source directory (`app/`), not as an installed
+# package, so `uv sync` installs only its dependencies
+package = false
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+# The rule set shared by FOCA and FOCA apps (as in cloud-registry): FOCA's
+# rules plus `G` and `S`; `D` applies everywhere, also to the tests
+select = [
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "D",    # pydocstyle (docstrings)
+    "E",    # pycodestyle errors
+    "F",    # Pyflakes
+    "G",    # flake8-logging-format
+    "I",    # isort
+    "PL",   # Pylint
+    "RUF",  # Ruff-specific rules
+    "S",    # flake8-bandit (security)
+    "SIM",  # flake8-simplify
+    "UP",   # pyupgrade
+    "W",    # pycodestyle warnings
+]
+ignore = [
+    # Complexity limits, as in FOCA: some functions mirror the API's
+    # operations or take many test fixtures, and splitting them would obscure
+    # them
+    "PLR0912",  # too-many-branches
+    "PLR0913",  # too-many-arguments
+    "PLR0915",  # too-many-statements
+    "PLR0917",  # too-many-positional-arguments
+    # Flags HTTP status codes and other literals (e.g., lengths), which are
+    # clear as is
+    "PLR2004",  # magic-value-comparison
+]
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+known-first-party = ["pubgrade_sidecar", "test"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest checks with `assert`; the tests use fixed, made-up access tokens
+"test/**" = ["S101", "S105", "S106"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+files = ["app", "test"]
+# The app's packages are imported from `app/`, as in the tests (`pythonpath`
+# below) and the image
+mypy_path = "app"
+explicit_package_bases = true
+python_version = "3.9"
+# Complete type hints: all functions annotated, generic types parametrized
+# (instead of ruff's `ANN` rules, which report missing hints only, without
+# checking them)
+disallow_untyped_defs = true
+disallow_any_generics = true
+warn_unused_ignores = true
+
+# These ship no type information
+[[tool.mypy.overrides]]
+module = [
+    "connexion", "connexion.*", "foca", "foca.*", "kubernetes", "kubernetes.*",
+    "munch",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 pythonpath = ["app"]
@@ -11,3 +136,8 @@ testpaths = ["test"]
 
 [tool.coverage.run]
 source = ["app/pubgrade_sidecar"]
+
+[tool.coverage.report]
+# `pytest --cov` fails below 100%; Codecov's targets are the same
+# (`codecov.yml`)
+fail_under = 100
