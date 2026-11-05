@@ -67,5 +67,6 @@ venv/
 
 # Python tooling
 .coverage
+*.modified.yaml
 .pytest_cache/
 .venv/

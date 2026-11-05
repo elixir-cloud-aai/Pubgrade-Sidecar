@@ -5,14 +5,14 @@ from flask import Flask
 from munch import DefaultMunch
 
 from pubgrade_sidecar.controllers import getDeployment, getImage, \
-    deleteDeployment, updateDeployment, update_image
-from pubgrade_sidecar.errors.exceptions import Unauthorized, NotFound, DockerImageUnavailable
+    deleteDeployment, updateDeployment
+from pubgrade_sidecar.errors.exceptions import Unauthorized, NotFound
 
 class MockClass:
     pass
 
 
-def mock_list_namespaced_deployment(self, namespace: str):
+def mock_list_namespaced_deployment(self, namespace: str, **kwargs):
     resp = {
         'pods': [{'metadata': {'name': "build-complete-updater"}},
                  {'metadata': {'name': "mongodb"}},
@@ -25,9 +25,17 @@ def mock_list_namespaced_deployment(self, namespace: str):
     return pods
 
 
-def mock_read_namespaced_deployment(self, deployment_name, namespace):
+def mock_read_namespaced_deployment(self, deployment_name, namespace, **kwargs):
     resp = {
+        'metadata': {'generation': 1},
+        'status': {
+            'observed_generation': 1,
+            'updated_replicas': 1,
+            'replicas': 1,
+            'available_replicas': 1,
+        },
         'spec': {
+            'replicas': 1,
             'template': {
                 'spec': {
                     'containers': [
@@ -40,7 +48,7 @@ def mock_read_namespaced_deployment(self, deployment_name, namespace):
     return DefaultMunch.fromDict(resp)
 
 
-def mock_read_namespaced_deployment_not_found(self, deployment_name, namespace):
+def mock_read_namespaced_deployment_not_found(self, deployment_name, namespace, **kwargs):
     resp = {
         'spec': {
             'template': {
@@ -54,7 +62,7 @@ def mock_read_namespaced_deployment_not_found(self, deployment_name, namespace):
     return DefaultMunch.fromDict(resp)
 
 
-def mock_delete_namespaced_pod(self, deployment_name, namespace):
+def mock_delete_namespaced_pod(self, deployment_name, namespace, **kwargs):
     pass
 
 
@@ -110,7 +118,7 @@ def test_get_image():
     app = Flask(__name__)
     with app.test_request_context('url', headers={'X-Access-Token':
                                                       'test-token'}):
-        assert 'akash7778/pubgrade:latest' == getImage('pubgrade')
+        assert 'akash7778/pubgrade:latest' == getImage('pubgrade').json["image"]
 
 
 def test_get_image_unauthorized():
@@ -146,7 +154,7 @@ def test_delete_deployment_unauthorized():
             deleteDeployment('pubgrade')
 
 
-def mock_patch_namespaced_deployment(self, name, namespace, body):
+def mock_patch_namespaced_deployment(self, name, namespace, body, **kwargs):
     resp = {
         'spec': {
             'template': {
@@ -164,33 +172,12 @@ def mock_patch_namespaced_deployment(self, name, namespace, body):
 @patch('kubernetes.client.AppsV1Api.read_namespaced_deployment', mock_read_namespaced_deployment)
 @patch('kubernetes.client.AppsV1Api.patch_namespaced_deployment', mock_patch_namespaced_deployment)
 @patch('pubgrade_sidecar.controllers.check_docker_image_availability', return_value=True)
-def test_update_deployment(mock_controllers):
+@patch('pubgrade_sidecar.controllers._executor')
+def test_update_deployment(mock_executor, mock_controllers):
     app = Flask(__name__)
     with app.test_request_context('url', headers={
         'X-Access-Token': 'test-token'}, json={'image_name':
                                                    'akash7778/pubgrade', 'tag': '1.0'}):
-        response = updateDeployment('pubgrade')
+        response, code = updateDeployment('pubgrade')
+        assert code == 202
         assert 'Updating image in progress...' == response.json["message"]
-
-
-@patch("pubgrade_sidecar.controllers.time.sleep")
-@patch("pubgrade_sidecar.controllers.check_docker_image_availability")
-@patch('kubernetes.client.AppsV1Api.patch_namespaced_deployment')
-def test_update_image_successful(mock_patch_deployment, mock_check_image, mock_sleep):
-    mock_check_image.return_value = True
-
-    update_image("new_repo/image", "new_tag", "test_deployment", "test_patch", 0)
-
-    mock_patch_deployment.assert_called_once()
-
-
-@patch("pubgrade_sidecar.controllers.time.sleep")
-@patch("pubgrade_sidecar.controllers.check_docker_image_availability")
-@patch('kubernetes.client.AppsV1Api.patch_namespaced_deployment')
-def test_update_image_retry_exhausted(mock_patch_deployment, mock_check_image, mock_sleep):
-    mock_check_image.return_value = False
-
-    with pytest.raises(DockerImageUnavailable):
-        update_image("new_repo/image", "new_tag", "test_deployment", "test_patch", 3)
-
-    assert (mock_patch_deployment.call_count, 0)

@@ -105,14 +105,22 @@ jobs:
             echo "::error::Expected status 401, got ${status}"
             exit 1
           fi
-      # Without a cluster, the call then fails, but it must have passed the check
+      - name: Check that a missing token is a client error
+        run: |
+          status="$(curl --silent --show-error --output /dev/null \
+            --write-out '%{http_code}' "${API}/deployment/any")"
+          if [ "${status}" != "400" ]; then
+            echo "::error::Expected status 400, got ${status}"
+            exit 1
+          fi
+      # Passes the check, then fails as there is no cluster
       - name: Check that the configured token is accepted
         run: |
           status="$(curl --silent --show-error --output /dev/null \
             --write-out '%{http_code}' --header 'X-Access-Token: smoke' \
             "${API}/deployment/any")"
-          if [ "${status}" != "404" ]; then
-            echo "::error::Expected status 404, got ${status}"
+          if [ "${status}" != "500" ]; then
+            echo "::error::Expected status 500, got ${status}"
             exit 1
           fi
       - name: Show app logs
