@@ -1,8 +1,8 @@
 # Only send the files needed at runtime to the build context
 *
 !app/
-!requirements.txt
-!setup.py
+!pyproject.toml
+!uv.lock
 
 # Exclude caches and local files within the included paths
 **/__pycache__

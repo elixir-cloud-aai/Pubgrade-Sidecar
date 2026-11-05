@@ -1,0 +1,83 @@
+site_name: Pubgrade-Sidecar
+site_description: >-
+  Updates the image tags of Kubernetes Deployments when Pubgrade notifies it
+# Read the Docs serves each version under its own path (e.g., `/en/latest/`)
+site_url: !ENV [READTHEDOCS_CANONICAL_URL, "https://pubgrade-sidecar.readthedocs.io/en/latest/"]
+repo_url: https://github.com/elixir-cloud-aai/Pubgrade-Sidecar
+repo_name: elixir-cloud-aai/Pubgrade-Sidecar
+edit_uri: edit/master/docs/
+copyright: Copyright &copy; ELIXIR On-Cloud
+
+# Files included in pages (`pymdownx.snippets`)
+watch:
+  - README.md
+  - app/pubgrade_sidecar
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.footer
+    - navigation.top
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  # Sections of `README.md` (between `--8<-- [start:<name>]` and
+  # `--8<-- [end:<name>]`), so that they are not written twice; fails if a
+  # file or section is missing
+  - pymdownx.snippets:
+      check_paths: true
+  - pymdownx.superfences
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          # The app's packages are imported from `app/`
+          paths: ["app"]
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: false
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            filters: ["!^_"]
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Deployment: deployment.md
+  - API: api.md
+  - Development: development.md
+  - Code reference: reference.md
