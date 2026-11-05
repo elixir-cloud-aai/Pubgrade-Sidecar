@@ -43,5 +43,20 @@ curl --location --request PUT 'http://{pubgrade_sidecar-url}/deployment/
 }'
 ```
 
+## Development
+
+CI (`.github/workflows/ci.yml`) checks the pull request title, runs the unit
+tests, builds the image and lints and renders the chart. To run the unit tests
+locally, with Python 3.9 (the version of the base image) and
+[uv](https://docs.astral.sh/uv/) (pip 24.1 or newer rejects the metadata of a
+dependency of FOCA 0.12):
+
+```bash
+uv venv --python 3.9
+uv pip install -r requirements.txt --group dev
+uv run --no-project pytest --cov
+```
+
+They need neither a cluster nor a Kubernetes configuration.
 
 [pubgrade]: <https://github.com/elixir-cloud-aai/Pubgrade>

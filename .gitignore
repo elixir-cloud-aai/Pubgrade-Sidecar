@@ -64,3 +64,8 @@ node_modules/
 # Python virtual environment
 venv/
 
+
+# Python tooling
+.coverage
+.pytest_cache/
+.venv/

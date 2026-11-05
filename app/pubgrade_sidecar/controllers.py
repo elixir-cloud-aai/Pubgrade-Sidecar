@@ -1,4 +1,5 @@
 from kubernetes import client, config
+import logging
 import os
 import re
 
@@ -10,10 +11,32 @@ from pubgrade_sidecar.errors.exceptions import Unauthorized, NotFound, DockerIma
 
 namespace = os.getenv("NAMESPACE", "pubgrade_sidecar")
 
-if os.getenv("KUBERNETES_SERVICE_HOST"):
-    config.load_incluster_config()
-else:
-    config.load_kube_config()
+logger = logging.getLogger(__name__)
+
+
+def _load_kube_config() -> None:
+    """Load the configuration of the Kubernetes client.
+
+    In a cluster, the configuration of the pod is required, so that a sidecar
+    that can't work fails at startup. Outside a cluster, e.g., for the unit
+    tests, a missing configuration is only a warning.
+
+    Raises:
+        kubernetes.config.ConfigException: In a cluster, if the configuration
+            can't be loaded.
+    """
+    if os.getenv("KUBERNETES_SERVICE_HOST"):
+        config.load_incluster_config()
+        return
+    try:
+        config.load_kube_config()
+    except config.ConfigException as exc:
+        logger.warning(
+            "Kubernetes configuration not loaded, API calls will fail: %s", exc
+        )
+
+
+_load_kube_config()
 
 v1 = client.CoreV1Api()
 apiV1 = client.AppsV1Api()
