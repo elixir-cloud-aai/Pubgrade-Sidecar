@@ -1,9 +1,9 @@
 # Everything that must pass on pull requests and pushes to `master`: the pull
-# request title, the unit tests, the image and the chart. The gate
-# `passed` ("CI passed") is the only check to require. No `paths:` filters, so
-# that the gate always reports; skip jobs with `if:` instead (and allow the
-# skip in the gate). Runs also when a pull request is edited, so that the title
-# check follows the title
+# request title, the unit tests, the image and the chart; on pushes, publish the
+# image. The gate `passed` ("CI passed") is the only check to require. No
+# `paths:` filters, so that the gate always reports; skip jobs with `if:`
+# instead (and allow the skip in the gate). Runs also when a pull request is
+# edited, so that the title check follows the title
 
 name: CI
 on:
@@ -15,6 +15,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  IMAGE_NAME: docker.io/${{ vars.DOCKERHUB_ORG || 'elixircloud' }}/pubgrade-sidecar
 
 # Cancel superseded runs of a pull request; runs for pushes get their own
 # group, so that queued runs for successive pushes are not dropped. Runs for
@@ -167,19 +170,96 @@ jobs:
           helm version
           pytest test/chart
 
+  # Publishes the image of a push to `master`, once all other checks have passed:
+  # with a dated tag, as the central Pubgrade service does, `sha-<commit>` and
+  # `latest`. Pull requests only build it, in `smoke`. Forks skip it unless they
+  # set the variable `DOCKERHUB_ORG` (and the Docker Hub secrets) for their own
+  # organization
+  publish:
+    name: Publish image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ github.event_name == 'push' && (github.repository_owner == 'elixir-cloud-aai' || vars.DOCKERHUB_ORG != '') }}
+    needs: [test, smoke, chart]
+    # Docker Hub secrets, as in the org's other repos; the environment should
+    # only allow branch `master`
+    environment: dev-images
+    # One image at a time, and only for the newest commit on the branch, so that
+    # an older run can't overwrite `latest` with older code. If several pushes
+    # queue up, GitHub cancels the waiting job of all but the newest, which
+    # leaves `CI passed` red on those commits; that's harmless, as their images
+    # would have been skipped anyway
+    concurrency:
+      group: ${{ github.workflow }}-publish
+      cancel-in-progress: false
+    steps:
+      - name: Check that commit is still the branch head
+        id: head
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          # `ls-remote` matches ref suffixes, so keep only the exact ref
+          head="$(git ls-remote "https://github.com/${REPOSITORY}.git" "${REF}" \
+            | awk -v ref="${REF}" '$2 == ref { print $1 }')"
+          [ -n "${head}" ] || { echo "::error::Could not look up ${REF}"; exit 1; }
+          if [ "${head}" = "${SHA}" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Skipping publish: ${REF} has moved on to ${head}"
+          fi
+      - name: Check out repository
+        if: steps.head.outputs.current == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        if: steps.head.outputs.current == 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Generate image tags and labels
+        if: steps.head.outputs.current == 'true'
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          flavor: latest=false
+          tags: |
+            type=raw,value={{date 'YYYYMMDD'}}
+            type=raw,value=sha-${{ github.sha }}
+            type=raw,value=latest
+      - name: Log in to Docker Hub
+        if: steps.head.outputs.current == 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          username: ${{ secrets.DOCKERHUB_LOGIN }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push image
+        if: steps.head.outputs.current == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          sbom: true
+          provenance: mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
   # The only check to require: passes if every other job passed, or was skipped
-  # where that is intended (`title` on pushes and for Dependabot). Any other
-  # result fails it. Add every new job to `needs`
+  # where that is intended (`title` on pushes and for Dependabot, `publish` on
+  # pull requests and in forks without `DOCKERHUB_ORG`; on pushes here, it is
+  # skipped only if a job it needs failed, which fails the gate anyway). Any
+  # other result fails it. Add every new job to `needs`
   passed:
     name: CI passed
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [title, test, smoke, chart]
+    needs: [title, test, smoke, chart, publish]
     permissions: {}
     steps:
       - name: Check results of all jobs
         uses: elixir-cloud-aai/.github/actions/gate@743e82d290a53768454999e413756a924e383259 # v1.0.0
         with:
           needs: ${{ toJSON(needs) }}
-          allow-skipped: title
+          allow-skipped: title publish

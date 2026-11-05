@@ -8,6 +8,21 @@ updates at pubgrade) in cloud native infrastructure at deployment side.
 
 > **_NOTE:_**  Project is still under development.
 
+## Image
+
+CI publishes [`elixircloud/pubgrade-sidecar`](https://hub.docker.com/r/elixircloud/pubgrade-sidecar)
+on every push to `master`, after all checks have passed, with three tags:
+the date (`YYYYMMDD` in UTC, moved by each push of that day), `sha-<commit>`,
+and `latest`. The chart defaults to `latest`; for a deployment, set `image.tag`
+to `sha-<commit>`, the only tag that never changes.
+
+Publishing runs in the environment `dev-images` and needs the Docker Hub
+secrets `DOCKERHUB_LOGIN` and `DOCKERHUB_TOKEN`; the environment should allow
+only the branch `master`. A fork publishes to its own Docker Hub organization
+once it sets these secrets and the Actions variable `DOCKERHUB_ORG` (for the
+repository or organization, not the environment); otherwise it skips
+publishing.
+
 ## Installation
 
 The chart in `deployment/` installs the sidecar into the namespace of the
