@@ -8,6 +8,7 @@ from flask import Flask
 from munch import DefaultMunch
 import pytest
 
+from pubgrade_sidecar import controllers
 from pubgrade_sidecar.controllers import (
     deleteDeployment,
     getDeployment,
@@ -86,19 +87,6 @@ def mock_read_namespaced_deployment_not_found(
     """
     resp: dict[str, Any] = {"spec": {"template": {"spec": {"containers": []}}}}
     return DefaultMunch.fromDict(resp)
-
-
-def mock_delete_namespaced_pod(
-    self: Any, deployment_name: str, namespace: str, **kwargs: Any
-) -> None:
-    """Delete nothing.
-
-    Args:
-        self: The API client.
-        deployment_name: Name of the pod.
-        namespace: Namespace of the pod.
-        **kwargs: Further arguments of the call.
-    """
 
 
 @patch(
@@ -211,12 +199,17 @@ def test_get_image_not_found() -> None:
         getImage("pubgrade")
 
 
-@patch("kubernetes.client.CoreV1Api.delete_namespaced_pod", mock_delete_namespaced_pod)
-def test_delete_deployment() -> None:
-    """Test that the deletion is confirmed."""
+@patch("kubernetes.client.CoreV1Api.delete_namespaced_pod")
+def test_delete_deployment(mock_delete: MagicMock) -> None:
+    """Test that the pod is deleted and the deletion confirmed."""
     app = Flask(__name__)
     with app.test_request_context("url", headers={"X-Access-Token": "test-token"}):
         assert deleteDeployment("pubgrade") == "deleted: pubgrade"
+    mock_delete.assert_called_once_with(
+        "pubgrade",
+        controllers.namespace,
+        _request_timeout=controllers.REQUEST_TIMEOUT,
+    )
 
 
 def test_delete_deployment_unauthorized() -> None:
@@ -253,6 +246,23 @@ def test_update_deployment(mock_executor: MagicMock, mock_check: MagicMock) -> N
             cast(dict[str, Any], response.json)["message"]
             == "Updating image in progress..."
         )
+    # The delivery of the new tag is started, with the patch of the image
+    image = "akash7778/pubgrade:1.0"
     mock_executor.submit.assert_called_once()
+    function, delivery, *args = mock_executor.submit.call_args.args
+    assert function is controllers._deliver
+    assert delivery.image == image
+    assert args == [
+        "akash7778/pubgrade",
+        "1.0",
+        "pubgrade",
+        [
+            {
+                "op": "replace",
+                "value": image,
+                "path": "/spec/template/spec/containers/0/image",
+            }
+        ],
+    ]
     # The image is checked in the background only
     mock_check.assert_not_called()
