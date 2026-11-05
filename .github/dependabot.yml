@@ -1,0 +1,48 @@
+version: 2
+updates:
+  # Dependencies in `pyproject.toml` and the lock (`uv.lock`), updated
+  # together; the image build installs the locked ones (`Dockerfile`)
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    versioning-strategy: increase-if-necessary
+    ignore:
+      # FOCA is bumped by hand, together with the base image (see the `docker`
+      # entry), and with it connexion
+      - dependency-name: foca
+      - dependency-name: connexion
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+        exclude-patterns: ["connexion", "foca"]
+  # Actions in the workflows, including the pins of the shared actions of
+  # `elixir-cloud-aai/.github` (to the commits of its releases,
+  # `@<commit> # vX.Y.Z`)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ["*"]
+  # Images in the `Dockerfile`: uv (tag and digest)
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      # FOCA is bumped by hand, in the base image and the `foca` requirement
+      # in `pyproject.toml` and `uv.lock` together
+      - dependency-name: elixircloud/foca
+    groups:
+      docker:
+        patterns: ["*"]
+  # Hook revisions in `.pre-commit-config.yaml`
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      pre-commit:
+        patterns: ["*"]

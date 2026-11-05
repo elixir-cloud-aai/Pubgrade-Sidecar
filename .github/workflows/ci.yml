@@ -1,5 +1,6 @@
 # Everything that must pass on pull requests and pushes to `master`: the pull
-# request title, the unit tests, the image, the chart, and the image and chart
+# request title, lint, types and the lock, the unit tests with their coverage,
+# the image and its known vulnerabilities, the chart, and the image and chart
 # together on a real cluster. The gate `passed` ("CI passed") is the only
 # check to require. No `paths:` filters, so that the gate always reports; skip
 # jobs with `if:` instead (and allow the skip in the gate). Runs also when a
@@ -50,6 +51,47 @@ jobs:
       - name: Check PR title
         uses: elixir-cloud-aai/.github/actions/pr-title@743e82d290a53768454999e413756a924e383259 # v1.0.0
 
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # uv, at the version locked in `uv.lock` (a dev dependency); the action
+      # checks its checksum. uv rather than pip, as pip 24.1 or newer rejects
+      # the metadata of flask-authz, a dependency of FOCA 0.12
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version-file: uv.lock
+      # The image build installs the locked dependencies (`Dockerfile`), so the
+      # lock must match `pyproject.toml` (run `uv lock` after changing
+      # dependencies; `uv sync --locked` below checks it too, but this step
+      # names the failure)
+      - name: Check lock file
+        run: uv lock --check
+      # The versions of `uv.lock` (as in the image), checked against its hashes,
+      # with the dev dependencies; mypy checks imports, so the runtime
+      # dependencies are needed too. All jobs use the Python version of the
+      # base image in the `Dockerfile`, from uv, as `actions/setup-python` has
+      # no 3.9 for the current `ubuntu-latest`
+      - name: Install dependencies
+        run: |
+          uv sync --locked --python 3.9
+          echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
+      - name: Cache pre-commit hook environments
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Run linters, type checks and security checks
+        run: |
+          pre-commit run --all-files --show-diff-on-failure
+          pre-commit run --all-files --hook-stage manual gitleaks-all
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -59,21 +101,28 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # uv, as pip 24.1 or newer rejects the metadata of flask-authz, a
-      # dependency of FOCA 0.12
+      # As in `lint`
       - name: Set up uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.12.13"
-      # The Python version of the base image in the `Dockerfile`, from uv, as
-      # `actions/setup-python` has no 3.9 for the current `ubuntu-latest`
+          version-file: uv.lock
       - name: Install dependencies
         run: |
-          uv venv --python 3.9
-          uv pip install -r requirements.txt --group dev
+          uv sync --locked --python 3.9
           echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
+      # Fails below 100% coverage (`fail_under` in `pyproject.toml`)
       - name: Run unit tests
-        run: pytest --cov --cov-report=term-missing --ignore=test/chart
+        run: pytest --cov --cov-report=term-missing --cov-report=xml --ignore=test/chart
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          # Outside the upstream repository (forks, which have no Codecov
+          # token), upload errors don't fail CI; pull requests from forks to
+          # upstream upload without a token and still fail on errors
+          fail_ci_if_error: ${{ github.repository_owner == 'elixir-cloud-aai' }}
+          verbose: true
 
   # Builds the image from the commit and starts it, without a cluster: the API
   # answers, and the access token is checked against the environment
@@ -127,6 +176,33 @@ jobs:
         if: failure()
         run: docker logs sidecar
 
+  # Builds the image from the commit and scans it for known vulnerabilities
+  # (shared action of elixir-cloud-aai/.github): fixable findings go to code
+  # scanning, except for pull requests from forks, whose tokens can't upload.
+  # Doesn't fail on them for now: the base image (FOCA 0.7, Python 3.9) has
+  # many fixable findings, which only moving to a newer FOCA image removes
+  scan:
+    name: Scan image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build image
+        run: docker build --tag pubgrade-sidecar:scan .
+      - name: Scan image
+        uses: elixir-cloud-aai/.github/actions/scan-image@743e82d290a53768454999e413756a924e383259 # v1.0.0
+        with:
+          image: pubgrade-sidecar:scan
+          category: image
+          upload: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+          fail: "false"
+
   # Builds the image from the commit and installs the chart on a throw-away k3s
   # cluster, in two namespaces (one with an arbitrary user ID, as on
   # OpenShift): notifications roll the target Deployments out to the new tag,
@@ -174,15 +250,14 @@ jobs:
           helm lint deployment --strict "${required[@]}" \
             --set ingress.enabled=true --set hostName=sidecar.example.org \
             --set ingress.tlsSecretName=sidecar-tls
-      # As in `test`
+      # As in `lint`
       - name: Set up uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.12.13"
+          version-file: uv.lock
       - name: Install dependencies
         run: |
-          uv venv --python 3.9
-          uv pip install -r requirements.txt --group dev
+          uv sync --locked --python 3.9
           echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
       # Fails instead of skipping the chart tests if Helm is missing
       - name: Test chart
@@ -198,7 +273,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [title, test, smoke, integration, chart]
+    needs: [title, lint, test, smoke, scan, integration, chart]
     permissions: {}
     steps:
       - name: Check results of all jobs

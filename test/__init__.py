@@ -1,1 +1,1 @@
-__version__ = "0.1.0"
+"""Tests of the Pubgrade sidecar."""

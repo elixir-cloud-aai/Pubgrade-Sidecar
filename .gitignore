@@ -70,3 +70,4 @@ venv/
 *.modified.yaml
 .pytest_cache/
 .venv/
+coverage.xml

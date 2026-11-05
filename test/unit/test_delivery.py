@@ -1,12 +1,13 @@
 """Tests for the delivery of notifications and the rollout status."""
 
+from collections.abc import Iterator
 import threading
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Optional, cast
 from unittest.mock import MagicMock, patch
 
-import pytest
 from flask import Flask
 from munch import DefaultMunch
+import pytest
 from werkzeug.exceptions import BadRequest, Unauthorized
 
 from pubgrade_sidecar import controllers
@@ -39,7 +40,7 @@ def deployment(
     updated_replicas: int = 1,
     total_replicas: int = 1,
     available_replicas: int = 1,
-    conditions: Optional[List[Dict[str, str]]] = None,
+    conditions: Optional[list[dict[str, str]]] = None,
     uid: str = "uid-1",
 ) -> DefaultMunch:
     """Build a Deployment as returned by the Kubernetes client.
@@ -117,7 +118,7 @@ def notify(app: Flask, image_name: str, tag: str = "1.2.0") -> Any:
         return controllers.updateDeployment("tesk-api")
 
 
-def status(app: Flask) -> Dict[str, Any]:
+def status(app: Flask) -> dict[str, Any]:
     """Get the status of a deployment.
 
     Args:
@@ -127,7 +128,7 @@ def status(app: Flask) -> Dict[str, Any]:
         Status of the deployment.
     """
     with app.test_request_context("url", headers={"X-Access-Token": TOKEN}):
-        return controllers.getImage("tesk-api").json
+        return cast(dict[str, Any], controllers.getImage("tesk-api").json)
 
 
 @pytest.mark.parametrize(
@@ -156,9 +157,11 @@ def test_parse_image(image: str, expected: Any) -> None:
 def test_token_rejected(app: Flask, token: Optional[str]) -> None:
     """Test that a missing or wrong token gets a 401, not a 500."""
     headers = {} if token is None else {"X-Access-Token": token.encode("utf-8")}
-    with app.test_request_context("url", headers=headers):
-        with pytest.raises(Unauthorized):
-            controllers.getImage("tesk-api")
+    with (
+        app.test_request_context("url", headers=headers),
+        pytest.raises(Unauthorized),
+    ):
+        controllers.getImage("tesk-api")
 
 
 @patch(PATCH)
@@ -381,7 +384,7 @@ def test_newer_notification_wins(
 def test_rollout_status(
     mock_read: MagicMock,
     app: Flask,
-    state: Dict[str, Any],
+    state: dict[str, Any],
     expected: str,
 ) -> None:
     """Test that the rollout status follows the state of the Deployment."""
