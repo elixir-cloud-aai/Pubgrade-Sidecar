@@ -1,9 +1,9 @@
 """Tests for the Helm chart, on its rendered templates."""
 
+from pathlib import Path
 import shutil
 import subprocess
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 import yaml
@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def run_helm(settings: List[str]) -> "subprocess.CompletedProcess[str]":
+def run_helm(settings: list[str]) -> "subprocess.CompletedProcess[str]":
     """Render the chart.
 
     Args:
@@ -31,10 +31,13 @@ def run_helm(settings: List[str]) -> "subprocess.CompletedProcess[str]":
     command = ["helm", "template", "sidecar", str(CHART), "--namespace", "tes"]
     for setting in settings:
         command += ["--set", setting]
-    return subprocess.run(command, capture_output=True, text=True, check=False)
+    # A fixed command, with values from the tests only
+    return subprocess.run(  # noqa: S603
+        command, capture_output=True, text=True, check=False
+    )
 
 
-def render_all(*settings: str) -> List[Dict[str, Any]]:
+def render_all(*settings: str) -> list[dict[str, Any]]:
     """Render the chart with the required values.
 
     Args:
@@ -48,7 +51,7 @@ def render_all(*settings: str) -> List[Dict[str, Any]]:
     return [document for document in yaml.safe_load_all(result.stdout) if document]
 
 
-def render(*settings: str) -> Dict[str, Dict[str, Any]]:
+def render(*settings: str) -> dict[str, dict[str, Any]]:
     """Render the chart with the required values, for one resource per kind.
 
     Args:
@@ -65,24 +68,28 @@ def render(*settings: str) -> Dict[str, Dict[str, Any]]:
     [
         ([], "targetDeployments"),
         (REQUIRED[:1], "accessToken.existingSecret"),
-        (REQUIRED + ["route.enabled=true"], "hostName"),
-        (REQUIRED + ["ingress.enabled=true"], "hostName"),
+        ([*REQUIRED, "route.enabled=true"], "hostName"),
+        ([*REQUIRED, "ingress.enabled=true"], "hostName"),
         (
-            REQUIRED + ["ingress.enabled=true", "hostName=a.example.org"],
+            [*REQUIRED, "ingress.enabled=true", "hostName=a.example.org"],
             "ingress.tlsSecretName",
         ),
         (
-            REQUIRED
-            + ["route.enabled=true", "ingress.enabled=true", "hostName=a.example.org"],
+            [
+                *REQUIRED,
+                "route.enabled=true",
+                "ingress.enabled=true",
+                "hostName=a.example.org",
+            ],
             "not both",
         ),
-        (REQUIRED + ["appName=Not_Valid"], "appName"),
-        (REQUIRED + ["appName=" + "a" * 64], "appName"),
-        (REQUIRED[1:] + ["targetDeployments=tesk-api"], "targetDeployments"),
-        (REQUIRED[1:] + ["targetDeployments[0]=123"], "targetDeployments"),
+        ([*REQUIRED, "appName=Not_Valid"], "appName"),
+        ([*REQUIRED, "appName=" + "a" * 64], "appName"),
+        ([*REQUIRED[1:], "targetDeployments=tesk-api"], "targetDeployments"),
+        ([*REQUIRED[1:], "targetDeployments[0]=123"], "targetDeployments"),
     ],
 )
-def test_incomplete_values_fail(settings: List[str], message: str) -> None:
+def test_incomplete_values_fail(settings: list[str], message: str) -> None:
     """Test that values that can't work fail at rendering, with a reason."""
     result = run_helm(settings)
     assert result.returncode != 0

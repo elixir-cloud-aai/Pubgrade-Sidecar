@@ -1,17 +1,20 @@
-from kubernetes import client, config
-from kubernetes.client.rest import ApiException
+"""Controllers of the API: read and update the image tags of Deployments."""
+
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import hmac
 import logging
 import os
 import re
 import threading
-from typing import Any, Dict, List, NoReturn, Optional, Tuple
-
-from flask import request, jsonify
-import requests
 import time
-from concurrent.futures import ThreadPoolExecutor
+from typing import Any, NoReturn, Optional, cast
+
+from flask import Response, jsonify, request
+from kubernetes import client, config
+from kubernetes.client.rest import ApiException
+import requests
+
 from pubgrade_sidecar.errors.exceptions import (
     BadRequest,
     DockerImageUnavailable,
@@ -83,7 +86,7 @@ class _Delivery:
 # The last delivery per deployment, in memory: the sidecar has one replica. A
 # restart loses a delivery that still waits for its image; for a patched one,
 # the Deployment itself still tells the state of the rollout
-_deliveries: Dict[str, _Delivery] = {}
+_deliveries: dict[str, _Delivery] = {}
 _lock = threading.Lock()
 # A sidecar serves few deployments, each with rare notifications
 _executor = ThreadPoolExecutor(max_workers=4)
@@ -104,7 +107,7 @@ def _check_token() -> None:
         raise Unauthorized
 
 
-def _parse_image(image: str) -> Tuple[str, Optional[str]]:
+def _parse_image(image: str) -> tuple[str, Optional[str]]:
     """Split an image into its canonical repository and its tag.
 
     Args:
@@ -114,13 +117,13 @@ def _parse_image(image: str) -> Tuple[str, Optional[str]]:
         Repository and tag, if any. For Docker Hub, the repository has no
         registry prefix, and its official images are under `library/`.
     """
-    name = image.split("@")[0]
+    name = image.split("@", maxsplit=1)[0]
     repository, tag = name, None
     if ":" in name.rsplit("/", 1)[-1]:
         repository, tag = name.rsplit(":", 1)
     for prefix in DOCKER_HUB_PREFIXES:
         if repository.startswith(prefix):
-            repository = repository[len(prefix):]
+            repository = repository[len(prefix) :]
             break
     if "/" not in repository:
         repository = f"library/{repository}"
@@ -137,7 +140,7 @@ def _is_on_docker_hub(repository: str) -> bool:
         Whether its first part, unlike a registry host, has neither a dot nor
         a port.
     """
-    first = repository.split("/")[0]
+    first = repository.split("/", maxsplit=1)[0]
     return not ("." in first or ":" in first or first == "localhost")
 
 
@@ -159,7 +162,7 @@ def _raise_api_error(exc: ApiException) -> NoReturn:
     raise exc
 
 
-def _read_deployment(deployment_name: str) -> Tuple[Any, str]:
+def _read_deployment(deployment_name: str) -> tuple[Any, str]:
     """Read a deployment.
 
     Args:
@@ -183,7 +186,7 @@ def _read_deployment(deployment_name: str) -> Tuple[Any, str]:
     try:
         return deployment, deployment.spec.template.spec.containers[0].image
     except IndexError:
-        raise NotFound
+        raise NotFound from None
 
 
 def _rollout_status(deployment: Any) -> str:
@@ -215,7 +218,16 @@ def _rollout_status(deployment: Any) -> str:
     return "complete"
 
 
-def getDeployment():
+def getDeployment() -> list[str]:
+    """List the deployments in the namespace.
+
+    Returns:
+        Names of the deployments.
+
+    Raises:
+        Unauthorized: If the token is missing or wrong.
+        Forbidden: If the sidecar has no right to list the deployments.
+    """
     _check_token()
     try:
         pod_list = apiV1.list_namespaced_deployment(
@@ -229,7 +241,7 @@ def getDeployment():
     return pods
 
 
-def getImage(deployment_name: str):
+def getImage(deployment_name: str) -> Response:
     """Report the image and the rollout status of a deployment.
 
     The record of the delivery is read before the Deployment, so that a
@@ -279,7 +291,20 @@ def getImage(deployment_name: str):
     return jsonify(result)
 
 
-def deleteDeployment(deployment_name: str):
+def deleteDeployment(deployment_name: str) -> str:
+    """Delete the pod of the given name.
+
+    Args:
+        deployment_name: Name of the pod.
+
+    Returns:
+        Confirmation of the deletion.
+
+    Raises:
+        Unauthorized: If the token is missing or wrong.
+        NotFound: If the pod doesn't exist.
+        Forbidden: If the sidecar has no right to delete the pod.
+    """
     _check_token()
     try:
         v1.delete_namespaced_pod(
@@ -290,7 +315,7 @@ def deleteDeployment(deployment_name: str):
     return "deleted: " + deployment_name
 
 
-def updateDeployment(deployment_name: str):
+def updateDeployment(deployment_name: str) -> tuple[Response, int]:
     """Accept a notification of a new image and start the delivery.
 
     Only the tag of the image can change. The delivery runs in the background;
@@ -312,12 +337,14 @@ def updateDeployment(deployment_name: str):
         ImageRegistryUnsupported: If the image isn't on Docker Hub.
     """
     _check_token()
-    image_tag = request.json["tag"]
+    # The API's validation ensures a JSON object with both fields
+    body = cast(dict[str, str], request.json)
+    image_tag = body["tag"]
     if not VALID_TAG.fullmatch(image_tag):
         raise BadRequest
     _, old_image = _read_deployment(deployment_name)
 
-    image_repo = _parse_image(request.json["image_name"])[0]
+    image_repo = _parse_image(body["image_name"])[0]
     old_repo, old_tag = _parse_image(old_image)
     if old_repo != image_repo:
         raise ImageRepositoryMismatch
@@ -348,12 +375,8 @@ def updateDeployment(deployment_name: str):
     delivery = _Delivery(image=image)
     with _lock:
         _deliveries[deployment_name] = delivery
-    _executor.submit(
-        _deliver, delivery, image_repo, image_tag, deployment_name, patch
-    )
-    return jsonify(
-        {"message": "Updating image in progress...", "image": image}
-    ), 202
+    _executor.submit(_deliver, delivery, image_repo, image_tag, deployment_name, patch)
+    return jsonify({"message": "Updating image in progress...", "image": image}), 202
 
 
 def _is_current(delivery: _Delivery, deployment_name: str) -> bool:
@@ -375,7 +398,7 @@ def _deliver(
     image_repo: str,
     image_tag: str,
     deployment_name: str,
-    patch: List[Dict[str, str]],
+    patch: list[dict[str, str]],
 ) -> None:
     """Wait for an image, then patch the deployment, and record the outcome.
 
@@ -453,7 +476,7 @@ def _wait_for_image(
     raise DockerImageUnavailable
 
 
-def check_docker_image_availability(image_name, tag='latest'):
+def check_docker_image_availability(image_name: str, tag: str = "latest") -> bool:
     """Check whether Docker Hub has an image.
 
     Args:
@@ -463,8 +486,8 @@ def check_docker_image_availability(image_name, tag='latest'):
     Returns:
         Whether the image is available. Network errors count as not available.
     """
-    base_url = 'https://hub.docker.com'
-    url = f'{base_url}/v2/repositories/{image_name}/tags/{tag}/'
+    base_url = "https://hub.docker.com"
+    url = f"{base_url}/v2/repositories/{image_name}/tags/{tag}/"
     try:
         response = requests.get(url, timeout=REQUEST_TIMEOUT)
     except requests.RequestException:

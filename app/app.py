@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Start the sidecar with the development server of Flask."""
+
 from foca import Foca
 
 if __name__ == "__main__":
