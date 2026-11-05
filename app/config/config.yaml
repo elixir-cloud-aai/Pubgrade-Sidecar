@@ -1,10 +1,10 @@
 server:
     host: '0.0.0.0'
     port: 8080
-    debug: True
-    environment: development
-    testing: True
-    use_reloader: True
+    debug: False
+    environment: production
+    testing: False
+    use_reloader: False
 
 api:
     specs:
@@ -23,7 +23,3 @@ exceptions:
      required_members: [['msg'], ['status_code']]
      status_member: ['status_code']
      exceptions: pubgrade_sidecar.errors.exceptions.exceptions
-
-environments:
-    secrets:
-        access_token: "Access@123"

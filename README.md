@@ -19,23 +19,27 @@ updates at pubgrade) in cloud native infrastructure at deployment side.
 
 ## Usage
 
+All calls need the access token, which the sidecar takes from the environment
+variable `ACCESS_TOKEN`. Without that variable, it rejects all calls.
+
 - Get available deployments in the namespace
  ```bash
- curl --location --request GET 'http://{pubgrade_sidecar-url}/deployment'
+ curl --location --request GET 'http://{pubgrade_sidecar-url}/deployment' \
+ --header 'X-Access-Token: {access-token}'
  ```
 
 - Get current image of the deployment.
 ```bash
 curl --location --request GET 'http://{pubgrade_sidecar-url}/deployment/
 {deployment-name}' \
---header 'X-Access-Token: {access-token (specified at config.yaml)}'
+--header 'X-Access-Token: {access-token}'
 ```
 
 - Modify image tag of the deployment.
 ```bash
 curl --location --request PUT 'http://{pubgrade_sidecar-url}/deployment/
 {deployment-name}' \
---header 'X-Access-Token: {access-token (specified at config.yaml)}' \
+--header 'X-Access-Token: {access-token}' \
 --header 'Content-Type: application/json' \
 --data-raw '{
     "image_name": "akash7778/pubgrade",
@@ -46,8 +50,8 @@ curl --location --request PUT 'http://{pubgrade_sidecar-url}/deployment/
 ## Development
 
 CI (`.github/workflows/ci.yml`) checks the pull request title, runs the unit
-tests, builds the image and lints and renders the chart. To run the unit tests
-locally, with Python 3.9 (the version of the base image) and
+tests, builds and starts the image and lints and renders the chart. To run the
+unit tests locally, with Python 3.9 (the version of the base image) and
 [uv](https://docs.astral.sh/uv/) (pip 24.1 or newer rejects the metadata of a
 dependency of FOCA 0.12):
 

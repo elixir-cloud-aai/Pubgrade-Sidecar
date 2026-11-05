@@ -1,9 +1,10 @@
 from kubernetes import client, config
+import hmac
 import logging
 import os
 import re
 
-from flask import current_app, request, jsonify
+from flask import request, jsonify
 import requests
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -46,7 +47,23 @@ RETRY_INTERVAL = 30
 
 
 
+def _check_token() -> None:
+    """Check the access token of the current request.
+
+    The token comes from the environment variable `ACCESS_TOKEN`. Without it,
+    all requests are rejected.
+
+    Raises:
+        Unauthorized: If the token is missing or wrong, or none is configured.
+    """
+    expected = os.getenv("ACCESS_TOKEN", "")
+    token = request.headers.get("X-Access-Token", "")
+    if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
+        raise Unauthorized
+
+
 def getDeployment():
+    _check_token()
     pod_list = apiV1.list_namespaced_deployment(namespace)
     pods = []
     for pod in pod_list.items:
@@ -55,13 +72,7 @@ def getDeployment():
 
 
 def getImage(deployment_name: str):
-    access_token = current_app.config["FOCA"].environments["secrets"][
-        "access_token"
-    ]
-    x_access_token = request.headers["X-Access-Token"]
-
-    if access_token != x_access_token:
-        raise Unauthorized
+    _check_token()
 
     try:
         deployment = apiV1.read_namespaced_deployment(
@@ -73,13 +84,7 @@ def getImage(deployment_name: str):
 
 
 def deleteDeployment(deployment_name: str):
-    access_token = current_app.config["FOCA"].environments["secrets"][
-        "access_token"
-    ]
-    x_access_token = request.headers["X-Access-Token"]
-
-    if access_token != x_access_token:
-        raise Unauthorized
+    _check_token()
 
     try:
         v1.delete_namespaced_pod(
@@ -91,13 +96,7 @@ def deleteDeployment(deployment_name: str):
 
 
 def updateDeployment(deployment_name: str):
-    access_token = current_app.config["FOCA"].environments["secrets"][
-        "access_token"
-    ]
-    x_access_token = request.headers["X-Access-Token"]
-
-    if access_token != x_access_token:
-        raise Unauthorized
+    _check_token()
 
     image_repo = request.json["image_name"]
     image_tag = request.json["tag"]

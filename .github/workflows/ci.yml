@@ -1,5 +1,5 @@
 # Everything that must pass on pull requests and pushes to `master`: the pull
-# request title, the unit tests, the image build and the chart. The gate
+# request title, the unit tests, the image and the chart. The gate
 # `passed` ("CI passed") is the only check to require. No `paths:` filters, so
 # that the gate always reports; skip jobs with `if:` instead (and allow the
 # skip in the gate). Runs also when a pull request is edited, so that the title
@@ -75,22 +75,49 @@ jobs:
       - name: Run unit tests
         run: pytest --cov --cov-report=term-missing
 
-  build:
-    name: Build image
+  # Builds the image from the commit and starts it, without a cluster: the API
+  # answers, and the access token is checked against the environment
+  smoke:
+    name: Smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      API: http://localhost:8080
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          push: false
+        run: docker build --tag pubgrade-sidecar:smoke .
+      - name: Start app
+        run: docker run --detach --name sidecar --publish 8080:8080 --env ACCESS_TOKEN=smoke pubgrade-sidecar:smoke
+      - name: Check that app responds
+        run: |
+          curl --fail --silent --show-error --output /dev/null \
+            --retry 20 --retry-delay 2 --retry-all-errors "${API}/ui/"
+      - name: Check that a wrong token is rejected
+        run: |
+          status="$(curl --silent --show-error --output /dev/null \
+            --write-out '%{http_code}' --header 'X-Access-Token: wrong' \
+            "${API}/deployment/any")"
+          if [ "${status}" != "401" ]; then
+            echo "::error::Expected status 401, got ${status}"
+            exit 1
+          fi
+      # Without a cluster, the call then fails, but it must have passed the check
+      - name: Check that the configured token is accepted
+        run: |
+          status="$(curl --silent --show-error --output /dev/null \
+            --write-out '%{http_code}' --header 'X-Access-Token: smoke' \
+            "${API}/deployment/any")"
+          if [ "${status}" != "404" ]; then
+            echo "::error::Expected status 404, got ${status}"
+            exit 1
+          fi
+      - name: Show app logs
+        if: failure()
+        run: docker logs sidecar
 
   chart:
     name: Chart
@@ -123,7 +150,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [title, test, build, chart]
+    needs: [title, test, smoke, chart]
     permissions: {}
     steps:
       - name: Check results of all jobs
