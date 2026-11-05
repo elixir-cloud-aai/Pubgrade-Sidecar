@@ -1,9 +1,9 @@
 # Pubgrade-Sidecar
 
-A microservice which would be co-deployed alongside [pubgrade][pubgrade] to 
-listen for update notifications from [pubgrade][pubgrade] and update the 
-subscribed service accordingly. The microservice is named as sidecar as it 
-would be co-deployed with the service of interest (service registered for 
+A microservice which would be co-deployed alongside [pubgrade][pubgrade] to
+listen for update notifications from [pubgrade][pubgrade] and update the
+subscribed service accordingly. The microservice is named as sidecar as it
+would be co-deployed with the service of interest (service registered for
 updates at pubgrade) in cloud native infrastructure at deployment side.
 
 > **_NOTE:_**  Project is still under development.
@@ -159,19 +159,41 @@ tells the state of the deployment, so compare `image` with what was notified.
 
 ## Development
 
-CI (`.github/workflows/ci.yml`) checks the pull request title, runs the unit
-tests, builds and starts the image and lints and tests the chart. To run the
-unit tests locally, with Python 3.9 (the version of the base image) and
+CI (`.github/workflows/ci.yml`) checks the pull request title, runs the linters
+and type checks, runs the unit tests with their coverage, builds and starts the
+image, scans it for known vulnerabilities and lints and tests the chart.
+
+Dependencies are declared in `pyproject.toml` and locked, with their hashes, in
+`uv.lock`; the image installs exactly the locked runtime dependencies. Use
 [uv](https://docs.astral.sh/uv/) (pip 24.1 or newer rejects the metadata of a
-dependency of FOCA 0.12):
+dependency of FOCA 0.12) and Python 3.9, the version of the base image. To set
+up the environment, with the dev dependencies, and run the unit tests:
 
 ```bash
-uv venv --python 3.9
-uv pip install -r requirements.txt --group dev
-uv run --no-project pytest --cov
+uv sync --python 3.9
+uv run pytest --cov
 ```
 
-They need neither a cluster nor a Kubernetes configuration. The chart tests in
-`test/chart` run if Helm is installed.
+They need neither a cluster nor a Kubernetes configuration, and fail below 100%
+coverage. The chart tests in `test/chart` run if Helm is installed. After
+changing dependencies in `pyproject.toml`, update the lock with `uv lock`; CI
+fails if it doesn't match.
+
+Linters (ruff), type checks (mypy) and the secret scan (gitleaks) run with
+[pre-commit](https://pre-commit.com/), on every commit once installed, and in
+CI:
+
+```bash
+uv run pre-commit install
+uv run pre-commit run --all-files
+```
+
+Dependabot proposes updates of the locked dependencies, the actions, the image
+of uv and the hooks. FOCA, and with it connexion and the base image, is updated
+by hand.
+
+## License
+
+[Apache License 2.0](LICENSE)
 
 [pubgrade]: <https://github.com/elixir-cloud-aai/Pubgrade>
