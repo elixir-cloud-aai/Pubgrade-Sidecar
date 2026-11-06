@@ -196,9 +196,10 @@ tells the state of the deployment, so compare `image` with what was notified.
 
 <!-- --8<-- [start:development] -->
 CI (`.github/workflows/ci.yml`) checks the pull request title, runs the linters
-and type checks, runs the unit tests with their coverage, builds and starts the
-image, scans it for known vulnerabilities, lints and tests the chart, runs the
-integration test and builds the documentation.
+and type checks, validates the citation metadata (`CITATION.cff`), runs the
+unit tests with their coverage, builds and starts the image, scans it for
+known vulnerabilities, lints and tests the chart, runs the integration test
+and builds the documentation.
 
 Dependencies are declared in `pyproject.toml` and locked, with their hashes, in
 `uv.lock`; the image installs exactly the locked runtime dependencies. Use
@@ -265,6 +266,11 @@ uv run --group docs mkdocs serve
 uv run --group docs mkdocs build --strict
 ```
 <!-- --8<-- [end:development] -->
+
+## Citation
+
+If you use Pubgrade-Sidecar, please cite it with the metadata in
+[`CITATION.cff`](CITATION.cff).
 
 ## License
 

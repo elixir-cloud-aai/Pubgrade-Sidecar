@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it using the metadata from this file.
+  Authors are listed by the number of lines they committed, then by the
+  number of their commits; equal contributors, if any, are listed
+  alphabetically by family name and marked with an asterisk (*) after their
+  family names.
+title: Pubgrade-Sidecar
+abstract: >-
+  Pubgrade-Sidecar runs next to the Kubernetes Deployments of a service and
+  rolls them out to new image tags when Pubgrade, a publish-subscribe service
+  for continuous delivery, notifies it of a new release. It reports the state
+  of each delivery, and is deployed with its Helm chart on Kubernetes and
+  OpenShift.
+type: software
+authors:
+  - given-names: Alexander
+    family-names: Kanitz
+    orcid: "https://orcid.org/0000-0002-3468-0652"
+    affiliation: >-
+      Biozentrum, University of Basel, Basel, Switzerland; SIB Swiss Institute
+      of Bioinformatics, Lausanne, Switzerland
+  - given-names: Akash
+    family-names: Saini
+repository-code: "https://github.com/elixir-cloud-aai/Pubgrade-Sidecar"
+keywords:
+  - Pubgrade
+  - continuous delivery
+  - Kubernetes
+  - OpenShift
+  - REST API
+  - OpenAPI
+  - FOCA
+license: Apache-2.0
