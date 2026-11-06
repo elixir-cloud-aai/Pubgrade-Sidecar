@@ -3,8 +3,7 @@ appName: pubgrade-sidecar
 
 image:
   repository: elixircloud/pubgrade-sidecar
-  # Better a dated tag, so that the version doesn't change by itself. Quote it if
-  # it looks like a number
+  # For a deployment better `sha-<commit>`, the only tag that stays on one commit
   tag: latest
   pullPolicy: Always
 
