@@ -182,9 +182,12 @@ def test_errors_are_problem_details(
 def test_request_body_size_limited(client: Any) -> None:
     """Test that request bodies larger than the configured limit are refused."""
     body = {"image_name": "x" * 70000, "tag": "1.2.0"}
-    with patch(READ, return_value=deployment("elixircloud/tesk-api:1.1.0")):
-        response = client.put(URL, headers=TOKEN, json=body)
+    response = client.put(URL, headers=TOKEN, json=body)
     assert response.status_code == 413
+    assert response.mimetype == "application/problem+json"
+    assert response.json["status"] == 413
+    assert response.json["detail"] == "The request body is larger than 64 KiB."
+    cast(MagicMock, controllers._executor).submit.assert_not_called()
 
 
 def test_create_app() -> None:
@@ -197,7 +200,6 @@ def test_create_app() -> None:
 
 def test_main_runs_development_server() -> None:
     """Test that `main()` runs the development server on the configured port."""
-    app = MagicMock()
-    with patch.object(sidecar_app, "create_app", return_value=app):
+    with patch.object(App, "run") as run:
         sidecar_app.main()
-    app.run.assert_called_once_with(port=app.port)
+    run.assert_called_once_with(port=8080)

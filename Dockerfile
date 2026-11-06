@@ -51,9 +51,10 @@ RUN --mount=from=uv,source=/uv,target=/usr/local/bin/uv \
   && rm -rf /tmp/src /tmp/uv-*.lock
 
 ## Copy the app, which runs from its source directory, owned by root and
-## read-only for the app's user (any user ID, e.g., on OpenShift)
+## read-only for the app's user (any user ID, e.g., on OpenShift), also if
+## the build context has restrictive file modes
 COPY ./app /app/app
-RUN python -m compileall -q /app/app
+RUN chmod -R a+rX,go-w /app/app && python -m compileall -q /app/app
 WORKDIR /app/app
 USER 1000
 

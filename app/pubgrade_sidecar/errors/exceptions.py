@@ -12,6 +12,7 @@ from werkzeug.exceptions import (
     InternalServerError,
     MethodNotAllowed,
     NotFound,
+    RequestEntityTooLarge,
     Unauthorized,
 )
 
@@ -96,6 +97,11 @@ exceptions = {
         "title": "Internal Server Error",
         "status": 500,
         "detail": "An unexpected error occurred.",
+    },
+    RequestEntityTooLarge: {
+        "title": "Content Too Large",
+        "status": 413,
+        "detail": "The request body is larger than 64 KiB.",
     },
     NotFound: {
         "title": "Not Found",

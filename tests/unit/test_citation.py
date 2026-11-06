@@ -18,7 +18,7 @@ SCRIPT = ROOT / "scripts/citation.py"
 _spec = importlib.util.spec_from_file_location("citation", SCRIPT)
 assert _spec and _spec.loader
 citation = importlib.util.module_from_spec(_spec)
-# Registered first, as dataclasses look up their module (Python 3.9)
+# Registered first, as dataclasses look up their module in `sys.modules`
 sys.modules[_spec.name] = citation
 _spec.loader.exec_module(citation)
 

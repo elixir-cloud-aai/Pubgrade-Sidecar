@@ -16,7 +16,7 @@ SCRIPT = ROOT / "scripts/release_notes.py"
 _spec = importlib.util.spec_from_file_location("release_notes", SCRIPT)
 assert _spec and _spec.loader
 release_notes = importlib.util.module_from_spec(_spec)
-# Registered first, as dataclasses look up their module (Python 3.9)
+# Registered first, as dataclasses look up their module in `sys.modules`
 sys.modules[_spec.name] = release_notes
 _spec.loader.exec_module(release_notes)
 

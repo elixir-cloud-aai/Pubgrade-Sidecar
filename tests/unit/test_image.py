@@ -1,8 +1,11 @@
 """Tests for the image build (`Dockerfile`) and its consistency with the lock."""
 
+import json
 from pathlib import Path
 import re
 import tomllib
+
+from foca import gunicorn_config
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE_IMAGE = re.compile(
@@ -40,14 +43,16 @@ def test_base_image_has_required_python() -> None:
 
 
 def test_image_serves_app_with_gunicorn() -> None:
-    """Test that the image serves the app factory with Gunicorn.
+    """Test that the image serves the app factory with FOCA's Gunicorn settings.
 
-    With FOCA's settings, one worker: deliveries are kept in memory.
+    These have one worker process, which the sidecar needs, as it keeps its
+    deliveries in memory.
     """
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert re.search(
-        r'^CMD \["gunicorn", "--config", "python:foca.gunicorn_config",'
-        r'\s*\\?\s*"pubgrade_sidecar.app:create_app\(\)"\]$',
-        dockerfile,
-        re.MULTILINE,
-    )
+    match = re.search(r"^CMD (\[.*?\])$", dockerfile.replace("\\\n", ""), re.M | re.S)
+    assert match is not None, "No CMD in exec form"
+    command = json.loads(match[1])
+    assert command[0] == "gunicorn"
+    assert "python:foca.gunicorn_config" in command
+    assert command[-1] == "pubgrade_sidecar.app:create_app()"
+    assert gunicorn_config.workers == 1
