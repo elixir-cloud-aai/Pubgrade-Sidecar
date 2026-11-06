@@ -18,15 +18,15 @@ is in [`docs/`](docs/index.md).
 
 <!-- --8<-- [start:image] -->
 CI publishes [`elixircloud/pubgrade-sidecar`](https://hub.docker.com/r/elixircloud/pubgrade-sidecar)
-on every push to `master`, after all checks have passed, with three tags:
+on every push to `dev`, after all checks have passed, with three tags:
 the date (`YYYYMMDD` in UTC, moved by each push of that day), `sha-<commit>`,
 and `latest`. The chart defaults to `latest`; for a deployment, set `image.tag`
 to `sha-<commit>`, the only tag that stays on one commit (only a re-run of CI
 for that commit rebuilds it).
 
 Publishing runs in the environment `dev-images` and needs the Docker Hub
-secrets `DOCKERHUB_LOGIN` and `DOCKERHUB_TOKEN`; the environment should allow
-only the branch `master`. A fork publishes to its own Docker Hub organization
+secrets `DOCKERHUB_LOGIN` and `DOCKERHUB_TOKEN` (organization secrets); the
+environment allows only the branch `dev`. A fork publishes to its own Docker Hub organization
 once it sets these secrets and the Actions variable `DOCKERHUB_ORG` (for the
 repository or organization, not the environment); otherwise it skips
 publishing. To deploy a fork's image, set `image.repository` to
