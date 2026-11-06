@@ -73,8 +73,8 @@ are). The chart deploys the image of its `appVersion` unless `image.tag` is
 set. So `latest` stays at the last image published from `dev` before the
 change until the first release. If you pull `latest` (or deployed the chart
 with its default tag) to follow development, switch to `sha-<commit>` (or
-`dev`), or to a release once there is one. Until the first release, the
-chart's `appVersion` names a version that has no image yet: set `image.tag`.
+`dev`), or to a release once there is one; until the first release, set
+`image.tag` when you install the chart (see above).
 
 ## Upgrading from chart version 0.1
 

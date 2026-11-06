@@ -104,20 +104,24 @@ release version, annotated, with a signature that GitHub verified, on
 packages the chart, pushes the image by digest, scans it, then attests and
 signs the image and the chart, tags the image `X.Y.Z` (and `latest` if it is
 the highest stable release; `scripts/release_version.py`) and creates the
-GitHub release, with the chart and its Sigstore bundle attached and GitHub's
-generated notes (for a first release, built by `scripts/release_notes.py`,
-as GitHub would start at an older tag of its own choice). Edit the notes by
-hand into the agreed format after publishing: the notes of immutable
-releases stay editable, their assets don't. Pushing the
+GitHub release, with the chart and its Sigstore bundle attached. Pushing the
 image and publishing the release each need approval in the environment
-`release`. Releases are immutable, so the release is created as a draft,
-gets its assets and is published last (`scripts/release_assets.py`); a
-re-run of failed jobs finishes it. Don't re-run all jobs of a release that
-was published: that builds a new image digest and moves the release's image
-tags to it before it fails at the release. The scan of the release image doesn't
-fail the release for now, nor does the weekly scan of `latest`
-(`.github/workflows/scan.yml`): the base image has many known
-vulnerabilities, which only moving to a newer FOCA image removes.
+`release`.
+
+The release gets GitHub's generated notes; for a first release (no published
+release before it), `scripts/release_notes.py` builds them instead, because
+without a previous tag GitHub starts at an older tag of its own choice. Edit
+the notes by hand into the agreed format after publishing: the notes of
+immutable releases stay editable, their assets don't. So the release is
+created as a draft, gets its assets and is published last
+(`scripts/release_assets.py`); a re-run of failed jobs finishes it. Don't
+re-run all jobs of a release that was published: that builds a new image
+digest and moves the release's image tags to it before it fails at the
+release.
+
+The scan of the release image doesn't fail the release for now, nor does the
+weekly scan of `latest` (`.github/workflows/scan.yml`): the base image has
+many known vulnerabilities, which only moving to a newer FOCA image removes.
 
 The scripts in `scripts/` use only the standard library and are tested in
 `tests/unit/`, with the app's coverage.
