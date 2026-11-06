@@ -6,6 +6,7 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    target-branch: dev
     versioning-strategy: increase-if-necessary
     ignore:
       # FOCA is bumped by hand, together with the base image (see the `docker`
@@ -31,6 +32,7 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    target-branch: dev
     groups:
       github-actions:
         patterns: ["*"]
@@ -39,6 +41,7 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    target-branch: dev
     ignore:
       # FOCA is bumped by hand, in the base image and the `foca` requirement
       # in `pyproject.toml` and `uv.lock` together
@@ -51,6 +54,7 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    target-branch: dev
     groups:
       pre-commit:
         patterns: ["*"]
