@@ -3,8 +3,11 @@ appName: pubgrade-sidecar
 
 image:
   repository: elixircloud/pubgrade-sidecar
-  # For a deployment better `sha-<commit>`, the only tag that stays on one commit
-  tag: latest
+  # Image tag; defaults to the chart's `appVersion`, the version of the
+  # release that the chart comes with. Images of commits on `dev` are tagged
+  # `dev` (the newest) and `sha-<commit>`; `latest` is the highest stable
+  # release
+  tag: ""
   pullPolicy: Always
 
 # Required: names of the Deployments in this namespace that the sidecar may

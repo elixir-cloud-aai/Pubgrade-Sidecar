@@ -299,11 +299,11 @@ jobs:
           helm version
           pytest tests/chart
 
-  # Publishes the image of a push to `dev`, once all other checks have passed:
-  # with a dated tag, as the central Pubgrade service does, `sha-<commit>` and
-  # `latest`. Pull requests only build it, in `smoke`. Forks skip it unless they
-  # set the variable `DOCKERHUB_ORG` (and the Docker Hub secrets) for their own
-  # organization
+  # Publishes the image of a push to `dev`, once all other checks have passed,
+  # tagged `dev` and `sha-<commit>`, as cloud-registry does; never `latest`,
+  # which only releases move (`release.yml`). Pull requests only build it, in
+  # `smoke`. Forks skip it unless they set the variable `DOCKERHUB_ORG` (and
+  # the Docker Hub secrets) for their own organization
   publish:
     name: Publish image
     runs-on: ubuntu-latest
@@ -314,7 +314,7 @@ jobs:
     # allows branch `dev`
     environment: dev-images
     # One image at a time, and only for the newest commit on the branch, so that
-    # an older run can't overwrite `latest` with older code. If several pushes
+    # an older run can't overwrite `dev` with older code. If several pushes
     # queue up, GitHub cancels the waiting job of all but the newest, which
     # leaves `CI passed` red on those commits; that's harmless, as their images
     # would have been skipped anyway
@@ -354,9 +354,8 @@ jobs:
           images: ${{ env.IMAGE_NAME }}
           flavor: latest=false
           tags: |
-            type=raw,value={{date 'YYYYMMDD'}}
+            type=raw,value=dev
             type=raw,value=sha-${{ github.sha }}
-            type=raw,value=latest
       - name: Log in to Docker Hub
         if: steps.head.outputs.current == 'true'
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
