@@ -5,7 +5,7 @@ site_description: >-
 site_url: !ENV [READTHEDOCS_CANONICAL_URL, "https://pubgrade-sidecar.readthedocs.io/en/latest/"]
 repo_url: https://github.com/elixir-cloud-aai/Pubgrade-Sidecar
 repo_name: elixir-cloud-aai/Pubgrade-Sidecar
-edit_uri: edit/master/docs/
+edit_uri: edit/dev/docs/
 copyright: Copyright &copy; ELIXIR On-Cloud
 
 # Files included in pages (`pymdownx.snippets`)
