@@ -1,5 +1,6 @@
 """Controllers of the API: read and update the image tags of Deployments."""
 
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import hmac
@@ -89,6 +90,10 @@ class _Delivery:
 # the Deployment itself still tells the state of the rollout
 _deliveries: dict[str, _Delivery] = {}
 _lock = threading.Lock()
+# One lock per deployment, held from the last check that a delivery is current
+# to the end of its patch, so that a delivery that a newer one replaced can't
+# overwrite the newer one's image; status reports don't wait for it
+_patch_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 # A sidecar serves few deployments, each with rare notifications
 _executor = ThreadPoolExecutor(max_workers=4)
 
@@ -409,8 +414,10 @@ def _deliver(
 ) -> None:
     """Wait for an image, then patch the deployment, and record the outcome.
 
-    A delivery that a newer notification has replaced stops. The Kubernetes API
-    is called outside the lock, so that status reports don't wait for it.
+    A delivery that a newer notification has replaced stops, also if it is
+    replaced just before its patch (checked again under the deployment's
+    patch lock). The Kubernetes API is called outside the lock of the
+    records, so that status reports don't wait for it.
 
     Args:
         delivery: Record of this delivery.
@@ -423,16 +430,22 @@ def _deliver(
         if not _wait_for_image(image_repo, image_tag, delivery, deployment_name):
             logger.info("Skipping a superseded delivery.")
             return
-        patched: Any = apiV1.patch_namespaced_deployment(
-            name=deployment_name,
-            namespace=namespace,
-            body=patch,
-            _request_timeout=REQUEST_TIMEOUT,
-        )
         with _lock:
-            delivery.state = "patched"
-            delivery.generation = patched.metadata.generation
-            delivery.uid = patched.metadata.uid
+            patch_lock = _patch_locks[deployment_name]
+        with patch_lock:
+            if not _is_current(delivery, deployment_name):
+                logger.info("Skipping a superseded delivery.")
+                return
+            patched: Any = apiV1.patch_namespaced_deployment(
+                name=deployment_name,
+                namespace=namespace,
+                body=patch,
+                _request_timeout=REQUEST_TIMEOUT,
+            )
+            with _lock:
+                delivery.state = "patched"
+                delivery.generation = patched.metadata.generation
+                delivery.uid = patched.metadata.uid
     except DockerImageUnavailable:
         logger.warning("Image of a notification isn't available.")
         _fail(delivery, "Image not available, or Docker Hub not reachable.")
