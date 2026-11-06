@@ -13,7 +13,7 @@
 # cluster, with its volumes, and the image it built. kubectl and Helm use a
 # kubeconfig of their own, so no other cluster is touched.
 #
-# Usage: test/integration/k3s.sh
+# Usage: tests/integration/k3s.sh
 # Environment (optional): K3S_IMAGE, the k3s image; API_PORT, the port of the
 # Kubernetes API on 127.0.0.1 (default 16443); FORWARD_PORT, the first of two
 # ports for the sidecars (default 18080); KEEP=1 keeps the cluster and the

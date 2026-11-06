@@ -121,7 +121,7 @@ jobs:
           echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
       # Fails below 100% coverage (`fail_under` in `pyproject.toml`)
       - name: Run unit tests
-        run: pytest --cov --cov-report=term-missing --cov-report=xml --ignore=test/chart
+        run: pytest --cov --cov-report=term-missing --cov-report=xml --ignore=tests/chart
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
@@ -240,7 +240,7 @@ jobs:
   # Builds the image from the commit and installs the chart on a throw-away k3s
   # cluster, in two namespaces (one with an arbitrary user ID, as on
   # OpenShift): notifications roll the target Deployments out to the new tag,
-  # and the status reports it (`test/integration/k3s.sh`). Needs Docker Hub,
+  # and the status reports it (`tests/integration/k3s.sh`). Needs Docker Hub,
   # for the images and the sidecar's check of the tags, without login: its
   # rate limits may fail the job now and then (rerun it)
   integration:
@@ -258,7 +258,7 @@ jobs:
         with:
           version: v3.22.1
       - name: Run integration test
-        run: test/integration/k3s.sh
+        run: tests/integration/k3s.sh
 
   chart:
     name: Chart
@@ -297,7 +297,7 @@ jobs:
       - name: Test chart
         run: |
           helm version
-          pytest test/chart
+          pytest tests/chart
 
   # Publishes the image of a push to `dev`, once all other checks have passed:
   # with a dated tag, as the central Pubgrade service does, `sha-<commit>` and

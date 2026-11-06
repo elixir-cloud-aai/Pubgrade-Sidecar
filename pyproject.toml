@@ -110,17 +110,17 @@ ignore = [
 
 [tool.ruff.lint.isort]
 force-sort-within-sections = true
-known-first-party = ["pubgrade_sidecar", "test"]
+known-first-party = ["pubgrade_sidecar", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
 # pytest checks with `assert`; the tests use fixed, made-up access tokens
-"test/**" = ["S101", "S105", "S106"]
+"tests/**" = ["S101", "S105", "S106"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [tool.mypy]
-files = ["app", "test"]
+files = ["app", "tests"]
 # The app's packages are imported from `app/`, as in the tests (`pythonpath`
 # below) and the image
 mypy_path = "app"
@@ -143,7 +143,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 pythonpath = ["app"]
-testpaths = ["test"]
+testpaths = ["tests"]
 
 [tool.coverage.run]
 source = ["app/pubgrade_sidecar"]
