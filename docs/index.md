@@ -16,4 +16,4 @@
 ## License
 
 The sidecar is released under the
-[Apache License 2.0](https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/blob/master/LICENSE).
+[Apache License 2.0](https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/blob/dev/LICENSE).

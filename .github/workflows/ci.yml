@@ -1,4 +1,4 @@
-# Everything that must pass on pull requests and pushes to `master`: the pull
+# Everything that must pass on pull requests and pushes to `dev`: the pull
 # request title, lint, types and the lock, the unit tests with their coverage,
 # the documentation, the image and its known vulnerabilities, the chart, and
 # the image and chart together on a real cluster; on pushes, publish the image.
@@ -10,10 +10,10 @@
 name: CI
 on:
   push:
-    branches: [master]
+    branches: [dev]
   pull_request:
     types: [opened, synchronize, reopened, edited]
-    branches: [master]
+    branches: [dev]
 
 permissions:
   contents: read
@@ -36,7 +36,7 @@ concurrency:
 
 jobs:
 
-  # Pull request titles become the commit messages on `master` (squash merges):
+  # Pull request titles become the commit messages on `dev` (squash merges):
   # Conventional Commits, at most 50 characters (shared action of
   # elixir-cloud-aai/.github, pinned to the commit of a release). Skipped on
   # pushes and for Dependabot, whose titles can't be configured to pass, unless
@@ -298,7 +298,7 @@ jobs:
           helm version
           pytest test/chart
 
-  # Publishes the image of a push to `master`, once all other checks have passed:
+  # Publishes the image of a push to `dev`, once all other checks have passed:
   # with a dated tag, as the central Pubgrade service does, `sha-<commit>` and
   # `latest`. Pull requests only build it, in `smoke`. Forks skip it unless they
   # set the variable `DOCKERHUB_ORG` (and the Docker Hub secrets) for their own
@@ -309,8 +309,8 @@ jobs:
     timeout-minutes: 20
     if: ${{ github.event_name == 'push' && (github.repository_owner == 'elixir-cloud-aai' || vars.DOCKERHUB_ORG != '') }}
     needs: [lint, test, docs, smoke, scan, integration, chart]
-    # Docker Hub secrets, as in the org's other repos; the environment should
-    # only allow branch `master`
+    # Docker Hub secrets, as in the org's other repos; the environment only
+    # allows branch `dev`
     environment: dev-images
     # One image at a time, and only for the newest commit on the branch, so that
     # an older run can't overwrite `latest` with older code. If several pushes
