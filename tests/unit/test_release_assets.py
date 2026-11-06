@@ -18,7 +18,7 @@ SCRIPT = ROOT / "scripts/release_assets.py"
 _spec = importlib.util.spec_from_file_location("release_assets", SCRIPT)
 assert _spec and _spec.loader
 release_assets = importlib.util.module_from_spec(_spec)
-# Registered first, as dataclasses look up their module (Python 3.9)
+# Registered first, as dataclasses look up their module in `sys.modules`
 sys.modules[_spec.name] = release_assets
 _spec.loader.exec_module(release_assets)
 

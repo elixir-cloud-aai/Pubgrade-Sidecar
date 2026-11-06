@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 import threading
-from typing import Any, Optional, cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from flask import Flask
@@ -40,7 +40,7 @@ def deployment(
     updated_replicas: int = 1,
     total_replicas: int = 1,
     available_replicas: int = 1,
-    conditions: Optional[list[dict[str, str]]] = None,
+    conditions: list[dict[str, str]] | None = None,
     uid: str = "uid-1",
 ) -> DefaultMunch:
     """Build a Deployment as returned by the Kubernetes client.
@@ -154,7 +154,7 @@ def test_parse_image(image: str, expected: Any) -> None:
 
 
 @pytest.mark.parametrize("token", [None, "wrong", "wröng"])
-def test_token_rejected(app: Flask, token: Optional[str]) -> None:
+def test_token_rejected(app: Flask, token: str | None) -> None:
     """Test that a missing or wrong token gets a 401, not a 500."""
     headers = {} if token is None else {"X-Access-Token": token.encode("utf-8")}
     with (
@@ -548,3 +548,27 @@ def test_check_image_uses_timeout(mock_get: MagicMock) -> None:
 def test_check_image_network_error(mock_get: MagicMock) -> None:
     """Test that a network error counts as image not available yet."""
     assert not controllers.check_docker_image_availability("org/app", "1")
+
+
+@patch(PATCH)
+def test_delivery_superseded_after_wait_does_not_patch(mock_patch: MagicMock) -> None:
+    """Test that a delivery replaced after its wait doesn't patch the Deployment.
+
+    Otherwise an older delivery could overwrite the image that a newer one
+    patched between the older one's last check and its patch.
+    """
+    older = controllers._Delivery(image="elixircloud/tesk-api:1.2.0")
+    newer = controllers._Delivery(image="elixircloud/tesk-api:1.3.0")
+    controllers._deliveries["tesk-api"] = older
+
+    def replaced_after_wait(*_: Any) -> bool:
+        """Let a newer notification replace the delivery as the wait ends."""
+        controllers._deliveries["tesk-api"] = newer
+        return True
+
+    with patch.object(controllers, "_wait_for_image", replaced_after_wait):
+        controllers._deliver(
+            older, "elixircloud/tesk-api", "1.2.0", "tesk-api", [{"op": "replace"}]
+        )
+    mock_patch.assert_not_called()
+    assert older.state == "waiting_for_image"

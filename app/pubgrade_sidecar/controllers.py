@@ -1,5 +1,6 @@
 """Controllers of the API: read and update the image tags of Deployments."""
 
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import hmac
@@ -8,7 +9,7 @@ import os
 import re
 import threading
 import time
-from typing import Any, NoReturn, Optional, cast
+from typing import Any, NoReturn, cast
 
 from flask import Response, jsonify, request
 from kubernetes import client, config
@@ -21,6 +22,7 @@ from pubgrade_sidecar.errors.exceptions import (
     Forbidden,
     ImageRegistryUnsupported,
     ImageRepositoryMismatch,
+    InternalServerError,
     NotFound,
     Unauthorized,
 )
@@ -78,9 +80,9 @@ class _Delivery:
 
     image: str
     state: str = "waiting_for_image"
-    detail: Optional[str] = None
+    detail: str | None = None
     generation: int = 0
-    uid: Optional[str] = None
+    uid: str | None = None
 
 
 # The last delivery per deployment, in memory: the sidecar has one replica. A
@@ -88,6 +90,10 @@ class _Delivery:
 # the Deployment itself still tells the state of the rollout
 _deliveries: dict[str, _Delivery] = {}
 _lock = threading.Lock()
+# One lock per deployment, held from the last check that a delivery is current
+# to the end of its patch, so that a delivery that a newer one replaced can't
+# overwrite the newer one's image; status reports don't wait for it
+_patch_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 # A sidecar serves few deployments, each with rare notifications
 _executor = ThreadPoolExecutor(max_workers=4)
 
@@ -107,7 +113,7 @@ def _check_token() -> None:
         raise Unauthorized
 
 
-def _parse_image(image: str) -> tuple[str, Optional[str]]:
+def _parse_image(image: str) -> tuple[str, str | None]:
     """Split an image into its canonical repository and its tag.
 
     Args:
@@ -153,13 +159,15 @@ def _raise_api_error(exc: ApiException) -> NoReturn:
     Raises:
         NotFound: If the object doesn't exist.
         Forbidden: If the sidecar has no right to access it.
-        ApiException: For other errors, which are no client errors.
+        InternalServerError: For other errors, which are no client errors
+            (not with the status of the Kubernetes API, which FOCA would
+            otherwise return, e.g., `503`).
     """
     if exc.status == 404:
         raise NotFound
     if exc.status == 403:
         raise Forbidden
-    raise exc
+    raise InternalServerError from exc
 
 
 def _read_deployment(deployment_name: str) -> tuple[Any, str]:
@@ -174,9 +182,12 @@ def _read_deployment(deployment_name: str) -> tuple[Any, str]:
     Raises:
         NotFound: If there is no such deployment, or it has no container.
         Forbidden: If the sidecar has no right to read it.
-        ApiException: For other errors of the Kubernetes API, which are no
-            client errors.
+        InternalServerError: For other errors of the Kubernetes API, which are
+            no client errors.
     """
+    # The client's models type all fields as optional; the API server sets
+    # those that are read here
+    deployment: Any
     try:
         deployment = apiV1.read_namespaced_deployment(
             deployment_name, namespace, _request_timeout=REQUEST_TIMEOUT
@@ -229,6 +240,7 @@ def getDeployment() -> list[str]:
         Forbidden: If the sidecar has no right to list the deployments.
     """
     _check_token()
+    pod_list: Any
     try:
         pod_list = apiV1.list_namespaced_deployment(
             namespace, _request_timeout=REQUEST_TIMEOUT
@@ -402,8 +414,10 @@ def _deliver(
 ) -> None:
     """Wait for an image, then patch the deployment, and record the outcome.
 
-    A delivery that a newer notification has replaced stops. The Kubernetes API
-    is called outside the lock, so that status reports don't wait for it.
+    A delivery that a newer notification has replaced stops, also if it is
+    replaced just before its patch (checked again under the deployment's
+    patch lock). The Kubernetes API is called outside the lock of the
+    records, so that status reports don't wait for it.
 
     Args:
         delivery: Record of this delivery.
@@ -416,16 +430,22 @@ def _deliver(
         if not _wait_for_image(image_repo, image_tag, delivery, deployment_name):
             logger.info("Skipping a superseded delivery.")
             return
-        patched = apiV1.patch_namespaced_deployment(
-            name=deployment_name,
-            namespace=namespace,
-            body=patch,
-            _request_timeout=REQUEST_TIMEOUT,
-        )
         with _lock:
-            delivery.state = "patched"
-            delivery.generation = patched.metadata.generation
-            delivery.uid = patched.metadata.uid
+            patch_lock = _patch_locks[deployment_name]
+        with patch_lock:
+            if not _is_current(delivery, deployment_name):
+                logger.info("Skipping a superseded delivery.")
+                return
+            patched: Any = apiV1.patch_namespaced_deployment(
+                name=deployment_name,
+                namespace=namespace,
+                body=patch,
+                _request_timeout=REQUEST_TIMEOUT,
+            )
+            with _lock:
+                delivery.state = "patched"
+                delivery.generation = patched.metadata.generation
+                delivery.uid = patched.metadata.uid
     except DockerImageUnavailable:
         logger.warning("Image of a notification isn't available.")
         _fail(delivery, "Image not available, or Docker Hub not reachable.")

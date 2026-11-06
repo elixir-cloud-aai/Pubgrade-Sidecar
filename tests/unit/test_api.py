@@ -5,14 +5,14 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
-from foca import Foca
+from connexion import App
 from kubernetes.client.rest import ApiException
 from munch import DefaultMunch
 import pytest
 
+from pubgrade_sidecar import app as sidecar_app
 from pubgrade_sidecar import controllers
 
-APP_DIR = Path(__file__).resolve().parents[2] / "app"
 READ = "kubernetes.client.AppsV1Api.read_namespaced_deployment"
 URL = "/deployment/tesk-api"
 TOKEN = {"X-Access-Token": "test-token"}
@@ -20,19 +20,23 @@ BODY = {"image_name": "elixircloud/tesk-api", "tag": "1.2.0"}
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
-    """Create a test client of the app.
+def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Any]:
+    """Create a test client of the app, as Gunicorn creates the app.
+
+    The app is created in another working directory, as it must not depend
+    on it.
 
     Args:
         monkeypatch: Fixture for changing the working directory.
+        tmp_path: Empty directory, as the working directory.
 
     Yields:
         The test client.
     """
-    monkeypatch.chdir(APP_DIR)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(controllers, "_executor", MagicMock())
     controllers._deliveries.clear()
-    app = Foca(config_file="config/config.yaml").create_app()
+    app = sidecar_app.create_app()
     yield app.app.test_client()
     controllers._deliveries.clear()
 
@@ -137,7 +141,9 @@ def test_notification_for_other_registry(client: Any) -> None:
             URL, headers=TOKEN, json={"image_name": image, "tag": "2.0"}
         )
     assert response.status_code == 409
-    assert "Docker Hub" in response.json["msg"]
+    assert response.mimetype == "application/problem+json"
+    assert response.json["status"] == 409
+    assert "Docker Hub" in response.json["detail"]
     cast(MagicMock, controllers._executor).submit.assert_not_called()
 
 
@@ -153,3 +159,49 @@ def test_status_report(client: Any) -> None:
         "updated_replicas": 1,
         "available_replicas": 1,
     }
+
+
+@pytest.mark.parametrize(
+    "request_args,code",
+    [
+        ({"headers": {"X-Access-Token": "wrong"}}, 401),
+        ({"headers": {}}, 400),
+    ],
+)
+def test_errors_are_problem_details(
+    client: Any, request_args: dict[str, Any], code: int
+) -> None:
+    """Test that errors are problem details (RFC 9457), with title and status."""
+    response = client.get(URL, **request_args)
+    assert response.status_code == code
+    assert response.mimetype == "application/problem+json"
+    assert response.json["status"] == code
+    assert response.json["title"]
+
+
+def test_request_body_size_limited(client: Any) -> None:
+    """Test that request bodies larger than the configured limit are refused."""
+    body = {"image_name": "x" * 70000, "tag": "1.2.0"}
+    response = client.put(URL, headers=TOKEN, json=body)
+    assert response.status_code == 413
+    assert response.mimetype == "application/problem+json"
+    assert response.json["status"] == 413
+    assert response.json["detail"] == (
+        "The request body is larger than the configured limit."
+    )
+    cast(MagicMock, controllers._executor).submit.assert_not_called()
+
+
+def test_create_app() -> None:
+    """Test that the factory creates the Connexion app with the sidecar's API."""
+    app = sidecar_app.create_app()
+    assert isinstance(app, App)
+    rules = {rule.rule for rule in app.app.url_map.iter_rules()}
+    assert "/deployment/<deployment_name>" in rules
+
+
+def test_main_runs_development_server() -> None:
+    """Test that `main()` runs the development server on the configured port."""
+    with patch.object(App, "run") as run:
+        sidecar_app.main()
+    run.assert_called_once_with(port=8080)

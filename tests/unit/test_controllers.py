@@ -1,7 +1,8 @@
 """Tests for the controllers, called directly in a request context."""
 
+from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Any, Callable, cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from flask import Flask

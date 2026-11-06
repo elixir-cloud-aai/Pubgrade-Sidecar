@@ -76,6 +76,28 @@ with its default tag) to follow development, switch to `sha-<commit>` (or
 `dev`), or to a release once there is one; until the first release, set
 `image.tag` when you install the chart (see above).
 
+## Upgrading to version 3.0.0 of the API
+
+Version 3.0.0 of the API (November 2026) runs on FOCA 0.21 and Python 3.13
+instead of FOCA 0.7 and Python 3.9. Calls and their successful responses stay
+the same, and so do the chart and its values. What changes:
+
+- **Errors are problem details** (`application/problem+json`, see
+  [API](api.md)): `title`, `status` (an integer) and `detail` instead of `msg`
+  and `status_code` (a string). Clients that read the error body need to
+  change; Pubgrade only reads the status code.
+- Errors of the Kubernetes API other than `403` and `404` are answered with
+  `500`, as documented, instead of passing on their status (e.g., `503`).
+- Request bodies larger than 64 KiB are rejected with `413`.
+- The image serves the app with Gunicorn instead of Flask's development
+  server, still on port 8080, with one worker process (keep it at one: the
+  sidecar keeps its deliveries in memory). Gunicorn's settings can be changed
+  via `GUNICORN_CMD_ARGS`.
+- The image runs as user 1000 (group 0), the user of the FOCA image, instead
+  of 1005, and its app files are read-only. The chart sets no fixed user, so
+  it needs no change; deployments of their own that set `runAsUser` may set
+  any user ID.
+
 ## Upgrading from chart version 0.1
 
 Uninstall the old release first (`helm uninstall`), then install as above:

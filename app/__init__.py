@@ -1,1 +1,1 @@
-"""Pubgrade sidecar, run from this directory (`app.py`)."""
+"""Pubgrade sidecar, run from this directory (`pubgrade_sidecar.app`)."""

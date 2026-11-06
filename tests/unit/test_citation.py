@@ -18,7 +18,7 @@ SCRIPT = ROOT / "scripts/citation.py"
 _spec = importlib.util.spec_from_file_location("citation", SCRIPT)
 assert _spec and _spec.loader
 citation = importlib.util.module_from_spec(_spec)
-# Registered first, as dataclasses look up their module (Python 3.9)
+# Registered first, as dataclasses look up their module in `sys.modules`
 sys.modules[_spec.name] = citation
 _spec.loader.exec_module(citation)
 
@@ -203,7 +203,7 @@ def test_main_default_date(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         @classmethod
         def now(cls, tz: datetime.tzinfo | None = None) -> Clock:
             """Return the time in a time zone (local time if `None`)."""
-            utc = cls(2026, 10, 23, 0, 30, tzinfo=datetime.timezone.utc)
+            utc = cls(2026, 10, 23, 0, 30, tzinfo=datetime.UTC)
             return utc.astimezone(tz or datetime.timezone(-datetime.timedelta(hours=1)))
 
     monkeypatch.setattr(citation.datetime, "datetime", Clock)
