@@ -53,9 +53,28 @@ Status  Meaning
 404     Deployment not found
 405     Method not allowed
 409     Another image repository, or one not on Docker Hub; nothing changed
+413     Request body larger than 64 KiB
 415     Media type not supported
 500     The Kubernetes API failed; try again
 ```
+
+Since version 3.0.0 of the API, errors are
+[problem details](https://www.rfc-editor.org/rfc/rfc9457)
+(`application/problem+json`), with `title`, `status` (an integer) and `detail`,
+e.g.:
+
+```json
+{
+  "title": "Conflict",
+  "status": 409,
+  "detail": "The deployment uses another image repository."
+}
+```
+
+For invalid requests, `detail` tells what is wrong, e.g.,
+`Missing header parameter 'X-Access-Token'`. Before, errors had `msg` and
+`status_code` (a string) instead (see
+[Upgrading to version 3.0.0 of the API](deployment.md#upgrading-to-version-300-of-the-api)).
 
 The `GET` call above reports the state of the delivery. Since version 2.0.0 of
 the API, it returns this object instead of only the image:

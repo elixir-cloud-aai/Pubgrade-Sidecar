@@ -14,13 +14,14 @@ OpenShift.
 ## Contents
 
 - [Deployment](deployment.md): install the sidecar with its Helm chart, on
-  Kubernetes and OpenShift, and upgrade from chart version 0.1.
-- [API](api.md): the calls, their status codes and the status report of a
-  delivery.
+  Kubernetes and OpenShift, upgrade to version 3.0.0 of the API, and upgrade
+  from chart version 0.1.
+- [API](api.md): the calls, their status codes, the errors and the status
+  report of a delivery.
 - [Development](development.md): the development setup, the checks and the
   documentation.
-- [Code reference](reference.md): the controllers and errors, generated from
-  their docstrings.
+- [Code reference](reference.md): the app factory, the controllers and the
+  errors, generated from their docstrings.
 
 ## Citation
 

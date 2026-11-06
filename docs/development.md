@@ -8,13 +8,25 @@ and builds the documentation.
 
 Dependencies are declared in `pyproject.toml` and locked, with their hashes, in
 `uv.lock`; the image installs exactly the locked runtime dependencies. Use
-[uv](https://docs.astral.sh/uv/) (pip 24.1 or newer rejects the metadata of a
-dependency of FOCA 0.12) and Python 3.9, the version of the base image. To set
-up the environment, with the dev dependencies, and run the unit tests:
+[uv](https://docs.astral.sh/uv/) and Python 3.13, the version of the base image
+(`requires-python` in `pyproject.toml`). To set up the environment, with the
+dev dependencies, and run the unit tests:
 
 ```bash
-uv sync --python 3.9
+uv sync --python 3.13
 uv run pytest --cov
+```
+
+The app is built on [FOCA](https://foca.readthedocs.io/): its configuration is
+`app/config/config.yaml`, and `app/pubgrade_sidecar/app.py` creates the app
+(`create_app()`). The image serves it with Gunicorn, with FOCA's settings
+(`foca.gunicorn_config`): one worker process with threads, as the sidecar
+keeps its deliveries in memory. To run it locally with Flask's development
+server, on port 8080:
+
+```bash
+cd app
+ACCESS_TOKEN=local uv run python -m pubgrade_sidecar.app
 ```
 
 They need neither a cluster nor a Kubernetes configuration, and fail below 100%
@@ -56,7 +68,11 @@ The mypy hook runs the mypy of the environment, so activate it
 
 Dependabot proposes updates of the locked dependencies, the actions, the image
 of uv and the hooks. FOCA, and with it connexion and the base image, is updated
-by hand.
+by hand: the tag and digest of the base image in the `Dockerfile` (its FOCA and
+Python versions), `foca` in `pyproject.toml` and the lock (`uv lock`) together,
+following FOCA's migration guides. The unit tests
+(`tests/unit/test_image.py`) fail if the base image's FOCA isn't the locked
+one, or its Python isn't the one `pyproject.toml` requires.
 
 The documentation is built with [MkDocs](https://www.mkdocs.org/) and
 [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/) from
@@ -119,9 +135,11 @@ re-run all jobs of a release that was published: that builds a new image
 digest and moves the release's image tags to it before it fails at the
 release.
 
-The scan of the release image doesn't fail the release for now, nor does the
-weekly scan of `latest` (`.github/workflows/scan.yml`): the base image has
-many known vulnerabilities, which only moving to a newer FOCA image removes.
+The images are scanned for known vulnerabilities with Trivy: in CI, in the
+release workflow before the image is signed and tagged, and weekly for
+`latest` (`.github/workflows/scan.yml`). Each scan fails on critical and high
+vulnerabilities that have a fix; accept a finding only with a reason and an
+expiry date, in `.trivyignore.yaml`.
 
 The scripts in `scripts/` use only the standard library and are tested in
 `tests/unit/`, with the app's coverage.
