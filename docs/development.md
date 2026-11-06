@@ -18,7 +18,7 @@ uv run pytest --cov
 ```
 
 They need neither a cluster nor a Kubernetes configuration, and fail below 100%
-coverage. The chart tests in `test/chart` run if Helm is installed. After
+coverage. The chart tests in `tests/chart` run if Helm is installed. After
 changing dependencies in `pyproject.toml`, update the lock with `uv lock`; CI
 fails if it doesn't match.
 
@@ -33,7 +33,7 @@ removes the cluster, with its volumes, and the image it built; kubectl and Helm
 use a kubeconfig of their own, so other clusters aren't touched:
 
 ```bash
-test/integration/k3s.sh
+tests/integration/k3s.sh
 ```
 
 `K3S_IMAGE` sets the k3s image, and `API_PORT` and `FORWARD_PORT` the local
