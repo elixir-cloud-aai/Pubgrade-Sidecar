@@ -7,10 +7,10 @@
 # findings are listed in `.trivyignore.yaml`. Doesn't fail on findings until
 # the first release: until then, `latest` is the last image published from
 # `dev` before releases took it over, on the old FOCA 0.7 image, with many
-# fixable findings. Drop `fail: "false"` in the first release-prep pull
-# request, so that it fails on critical and high vulnerabilities that have a
-# fix, as CI, `release.yml` and cloud-registry do. Scheduled runs use this
-# workflow (with its pin of the shared action
+# fixable findings. Drop `fail: "false"` once the first release has
+# published `latest`, so that it fails on critical and high vulnerabilities
+# that have a fix, as CI, `release.yml` and cloud-registry do. Scheduled
+# runs use this workflow (with its pin of the shared action
 # `elixir-cloud-aai/.github/actions/scan-image`) and
 # `.trivyignore.yaml` as on the default branch, and file their findings
 # under it. The image is public, so no Docker Hub secrets are needed; its

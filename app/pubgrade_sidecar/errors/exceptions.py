@@ -101,7 +101,7 @@ exceptions = {
     RequestEntityTooLarge: {
         "title": "Content Too Large",
         "status": 413,
-        "detail": "The request body is larger than 64 KiB.",
+        "detail": "The request body is larger than the configured limit.",
     },
     NotFound: {
         "title": "Not Found",

@@ -186,7 +186,9 @@ def test_request_body_size_limited(client: Any) -> None:
     assert response.status_code == 413
     assert response.mimetype == "application/problem+json"
     assert response.json["status"] == 413
-    assert response.json["detail"] == "The request body is larger than 64 KiB."
+    assert response.json["detail"] == (
+        "The request body is larger than the configured limit."
+    )
     cast(MagicMock, controllers._executor).submit.assert_not_called()
 
 
