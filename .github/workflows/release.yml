@@ -230,10 +230,9 @@ jobs:
   # it needs no login) with Trivy (shared action
   # `elixir-cloud-aai/.github/actions/scan-image`). Kept apart from `push` and
   # `publish`, so that Trivy never runs next to the Docker Hub credentials,
-  # the `contents: write` token and the signing identity. Doesn't fail on
-  # findings for now, as in CI: the base image (FOCA 0.7, Python 3.9) has many
-  # fixable ones, which only moving to a newer FOCA image removes (#31); make
-  # it blocking then
+  # the `contents: write` token and the signing identity. Fails on critical
+  # and high vulnerabilities that have a fix, as in CI, so that such an image
+  # is never signed, tagged or released
   scan:
     name: Scan release image
     needs: [prepare, push]
@@ -261,7 +260,6 @@ jobs:
           image: ${{ env.IMAGE_NAME }}@${{ needs.push.outputs.digest }}
           category: release
           upload: "false"
-          fail: "false"
 
   publish:
     name: Publish release

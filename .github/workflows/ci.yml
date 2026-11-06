@@ -65,8 +65,7 @@ jobs:
         with:
           persist-credentials: false
       # uv, at the version locked in `uv.lock` (a dev dependency); the action
-      # checks its checksum. uv rather than pip, as pip 24.1 or newer rejects
-      # the metadata of flask-authz, a dependency of FOCA 0.12
+      # checks its checksum
       - name: Set up uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
@@ -80,11 +79,11 @@ jobs:
       # The versions of `uv.lock` (as in the image), checked against its hashes,
       # with the dev dependencies; mypy checks imports, so the runtime
       # dependencies are needed too. All jobs use the Python version of the
-      # base image in the `Dockerfile`, from uv, as `actions/setup-python` has
-      # no 3.9 for the current `ubuntu-latest`
+      # base image in the `Dockerfile` (`requires-python` in `pyproject.toml`),
+      # from uv
       - name: Install dependencies
         run: |
-          uv sync --locked --python 3.9
+          uv sync --locked --python 3.13
           echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
       - name: Cache pre-commit hook environments
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -117,7 +116,7 @@ jobs:
           version-file: uv.lock
       - name: Install dependencies
         run: |
-          uv sync --locked --python 3.9
+          uv sync --locked --python 3.13
           echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
       # Fails below 100% coverage (`fail_under` in `pyproject.toml`)
       - name: Run unit tests
@@ -152,7 +151,7 @@ jobs:
           version-file: uv.lock
       - name: Install dependencies
         run: |
-          uv sync --locked --only-group docs --python 3.9
+          uv sync --locked --only-group docs --python 3.13
           echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
       # Fails on warnings, e.g., of broken links, anchors and references
       - name: Build documentation
@@ -213,8 +212,8 @@ jobs:
   # Builds the image from the commit and scans it for known vulnerabilities
   # (shared action of elixir-cloud-aai/.github): fixable findings go to code
   # scanning, except for pull requests from forks, whose tokens can't upload.
-  # Doesn't fail on them for now: the base image (FOCA 0.7, Python 3.9) has
-  # many fixable findings, which only moving to a newer FOCA image removes
+  # Fails on critical and high vulnerabilities that have a fix; accepted ones
+  # are listed in `.trivyignore.yaml`
   scan:
     name: Scan image
     runs-on: ubuntu-latest
@@ -235,7 +234,6 @@ jobs:
           image: pubgrade-sidecar:scan
           category: image
           upload: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-          fail: "false"
 
   # Builds the image from the commit and installs the chart on a throw-away k3s
   # cluster, in two namespaces (one with an arbitrary user ID, as on
@@ -291,7 +289,7 @@ jobs:
           version-file: uv.lock
       - name: Install dependencies
         run: |
-          uv sync --locked --python 3.9
+          uv sync --locked --python 3.13
           echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
       # Fails instead of skipping the chart tests if Helm is missing
       - name: Test chart

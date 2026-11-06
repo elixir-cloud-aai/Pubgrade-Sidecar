@@ -4,10 +4,8 @@
 # are reported: the findings that have a fix are uploaded to code scanning,
 # and a full report (findings without a fix included) is uploaded as the
 # workflow artifact `trivy-report-release-image` (JSON and table). Accepted
-# findings are listed in `.trivyignore.yaml`. Doesn't fail on findings for
-# now, as in CI and `release.yml`: the base image (FOCA 0.7, Python 3.9) has
-# many fixable ones, which only moving to a newer FOCA image removes (#31);
-# make it fail on critical and high vulnerabilities that have a fix then, as
+# findings are listed in `.trivyignore.yaml`. Fails on critical and high
+# vulnerabilities that have a fix, as in CI and `release.yml`, and as
 # cloud-registry does. Scheduled runs use this workflow (with its pin of the
 # shared action `elixir-cloud-aai/.github/actions/scan-image`) and
 # `.trivyignore.yaml` as on the default branch, and file their findings
@@ -47,4 +45,3 @@ jobs:
           image: docker.io/${{ vars.DOCKERHUB_ORG || 'elixircloud' }}/pubgrade-sidecar:latest
           category: release-image
           report: "true"
-          fail: "false"
