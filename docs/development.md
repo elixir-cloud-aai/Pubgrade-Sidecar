@@ -74,3 +74,54 @@ CI does, which fails on warnings, e.g., broken links:
 uv run --group docs mkdocs serve
 uv run --group docs mkdocs build --strict
 ```
+
+## Versioning and releases
+
+The app and its chart are released together, with one version: the tag
+`vX.Y.Z` (or `vX.Y.ZaN`, `vX.Y.ZbN` and `vX.Y.ZrcN` for pre-releases), the
+version in `pyproject.toml`, the chart's `appVersion` (the default image
+tag) and `version` (the SemVer form, e.g., `1.2.3-rc1` for `1.2.3rc1`), and
+the version in `CITATION.cff`. Until 1.0.0, all releases are GitHub
+pre-releases.
+
+For the first release, the chart's `version` (0.2.0, from before the
+release workflow) and the app's version (0.1.0) differ; the release-prep pull
+request sets both, e.g., to 0.2.0.
+
+1. Release-prep pull request to `dev`: set the version in `pyproject.toml`,
+   `deployment/Chart.yaml` (`version` and `appVersion`) and `CITATION.cff`
+   (`python scripts/citation.py set <version>`, which also sets the release
+   date), and run `uv lock`.
+2. Once CI has passed for its commit on `dev`, bring that commit to `main`.
+3. Tag it on `main` with a signed, annotated tag and push the tag:
+   `git tag -s v<version> -m v<version>`, then
+   `git push origin v<version>`.
+
+The release workflow (`.github/workflows/release.yml`) checks the tag (a
+release version, annotated, with a signature that GitHub verified, on
+`main`), that the versions above match it (`scripts/check_versions.py` and
+`scripts/citation.py check`) and that CI passed for a push of the commit. It
+packages the chart, pushes the image by digest, scans it, then attests and
+signs the image and the chart, tags the image `X.Y.Z` (and `latest` if it is
+the highest stable release; `scripts/release_version.py`) and creates the
+GitHub release, with the chart and its Sigstore bundle attached. Pushing the
+image and publishing the release each need approval in the environment
+`release`.
+
+The release gets GitHub's generated notes; for a first release (no published
+release before it), `scripts/release_notes.py` builds them instead, because
+without a previous tag GitHub starts at an older tag of its own choice. Edit
+the notes by hand into the agreed format after publishing: the notes of
+immutable releases stay editable, their assets don't. So the release is
+created as a draft, gets its assets and is published last
+(`scripts/release_assets.py`); a re-run of failed jobs finishes it. Don't
+re-run all jobs of a release that was published: that builds a new image
+digest and moves the release's image tags to it before it fails at the
+release.
+
+The scan of the release image doesn't fail the release for now, nor does the
+weekly scan of `latest` (`.github/workflows/scan.yml`): the base image has
+many known vulnerabilities, which only moving to a newer FOCA image removes.
+
+The scripts in `scripts/` use only the standard library and are tested in
+`tests/unit/`, with the app's coverage.

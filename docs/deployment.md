@@ -3,8 +3,8 @@
 The chart in
 [`deployment/`](https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/tree/dev/deployment)
 installs the sidecar into the namespace of the Deployments to upgrade, on
-Kubernetes and on OpenShift. It needs no fixed user
-ID, so OpenShift's default security constraints apply.
+Kubernetes and on OpenShift. It needs no fixed user ID, so OpenShift's
+default security constraints apply.
 
 1. Create a Secret with a token of its own for this site:
 
@@ -42,6 +42,10 @@ ID, so OpenShift's default security constraints apply.
    helm install pubgrade-sidecar deployment/ -n production -f my-values.yaml
    ```
 
+   The chart deploys the image of its `appVersion` unless `image.tag` is set
+   (see [Image](#image)). Until the first release, that version has no image
+   yet: set `image.tag` to `sha-<commit>` or `dev`.
+
 The sidecar gets `get` and `patch` on the `targetDeployments` and nothing else.
 So with the chart, `GET /deployment` and `DELETE /deployment/{name}` are refused:
 they would need further rights, which you can add with a Role of your own.
@@ -57,6 +61,20 @@ token at start:
 ```bash
 kubectl -n production rollout restart deployment/pubgrade-sidecar
 ```
+
+## Changed image tags (November 2026)
+
+Until the release workflow was added (November 2026), every push to `dev`
+moved the image tag `latest` (and a dated tag, `YYYYMMDD`), and the chart
+deployed `latest` by default. Now pushes to `dev` publish `dev` and
+`sha-<commit>`, `latest` moves only with releases, to the highest stable
+release, and dated tags are no longer published (existing ones stay as they
+are). The chart deploys the image of its `appVersion` unless `image.tag` is
+set. So `latest` stays at the last image published from `dev` before the
+change until the first release. If you pull `latest` (or deployed the chart
+with its default tag) to follow development, switch to `sha-<commit>` (or
+`dev`), or to a release once there is one; until the first release, set
+`image.tag` when you install the chart (see above).
 
 ## Upgrading from chart version 0.1
 
@@ -78,17 +96,33 @@ none                 targetDeployments, required
 
 ## Image
 
-CI publishes [`elixircloud/pubgrade-sidecar`](https://hub.docker.com/r/elixircloud/pubgrade-sidecar)
-on every push to `dev`, after all checks have passed, with three tags:
-the date (`YYYYMMDD` in UTC, moved by each push of that day), `sha-<commit>`,
-and `latest`. The chart defaults to `latest`; for a deployment, set `image.tag`
-to `sha-<commit>`, the only tag that stays on one commit (only a re-run of CI
-for that commit rebuilds it).
+The image is published as
+[`elixircloud/pubgrade-sidecar`](https://hub.docker.com/r/elixircloud/pubgrade-sidecar),
+with these tags:
 
-Publishing runs in the environment `dev-images` and needs the Docker Hub
-secrets `DOCKERHUB_LOGIN` and `DOCKERHUB_TOKEN` (organization secrets); the
-environment allows only the branch `dev`. A fork publishes to its own Docker
-Hub organization once it sets these secrets and the Actions variable
-`DOCKERHUB_ORG` (for the repository or organization, not the environment);
-otherwise it skips publishing. To deploy a fork's image, set
-`image.repository` to `<organization>/pubgrade-sidecar`.
+```text
+Tag              Image                                     Moves
+X.Y.Z            release X.Y.Z (also X.Y.ZrcN etc.)        no
+latest           highest stable release                    with each release
+dev              newest commit on branch dev               with each push to dev
+sha-<commit>     that commit on branch dev                 no
+```
+
+Releases are signed (Sigstore) and come with build provenance attestations;
+each GitHub release also has the chart of that version attached. The chart
+deploys the image of its `appVersion`, i.e., of its release, unless you set
+`image.tag`. To try unreleased changes, set `image.tag` to `sha-<commit>`
+(the only tag of a `dev` image that stays on one commit) or `dev`.
+
+Images from `dev` are published by CI on every push to `dev`, after all checks
+have passed, in the environment `dev-images`, which allows only the branch
+`dev`. Releases are published from version tags, in the environment
+`release` (see
+[Versioning and releases](development.md#versioning-and-releases)). Both
+need the Docker Hub secrets `DOCKERHUB_LOGIN` and `DOCKERHUB_TOKEN`
+(organization secrets).
+
+A fork publishes to its own Docker Hub organization once it sets these
+secrets and the Actions variable `DOCKERHUB_ORG` (for the repository or
+organization, not the environment); otherwise it skips publishing. To deploy
+a fork's image, set `image.repository` to `<organization>/pubgrade-sidecar`.

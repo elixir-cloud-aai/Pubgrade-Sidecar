@@ -120,7 +120,7 @@ known-first-party = ["pubgrade_sidecar", "tests"]
 convention = "google"
 
 [tool.mypy]
-files = ["app", "tests"]
+files = ["app", "scripts", "tests"]
 # The app's packages are imported from `app/`, as in the tests (`pythonpath`
 # below) and the image
 mypy_path = "app"
@@ -146,9 +146,11 @@ pythonpath = ["app"]
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["app/pubgrade_sidecar"]
+source = ["app/pubgrade_sidecar", "scripts"]
 
 [tool.coverage.report]
+# The scripts' entry points, run as programs (their `main` is tested)
+exclude_also = ['if __name__ == "__main__":']
 # `pytest --cov` fails below 100%; Codecov's targets are the same
 # (`codecov.yml`)
 fail_under = 100

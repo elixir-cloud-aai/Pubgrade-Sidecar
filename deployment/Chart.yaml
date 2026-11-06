@@ -2,5 +2,10 @@ apiVersion: v2
 name: pubgrade-sidecar
 description: Upgrades Deployments in its namespace on notifications from Pubgrade
 type: application
+# One version for the app and the chart: the release workflow checks that the
+# tag `vX.Y.Z` matches `version` (its SemVer form, e.g., `1.2.3-rc1` for
+# `1.2.3rc1`), `appVersion` and the version in `pyproject.toml`, which the
+# release-prep pull request sets (see "Versioning and releases" in
+# `docs/development.md`). `appVersion` is the default image tag
 version: 0.2.0
-appVersion: 0.1.0
+appVersion: "0.1.0"

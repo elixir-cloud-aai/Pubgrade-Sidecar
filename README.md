@@ -47,7 +47,7 @@ mind our [code of conduct][code-of-conduct].
 
 [badge-build-status]: <https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/actions/workflows/ci.yml/badge.svg?branch=dev>
 [badge-coverage]: <https://codecov.io/gh/elixir-cloud-aai/Pubgrade-Sidecar/branch/dev/graph/badge.svg?branch=dev>
-[badge-docker]: <https://img.shields.io/docker/v/elixircloud/pubgrade-sidecar?sort=date&label=image&color=C39BD3>
+[badge-docker]: <https://img.shields.io/docker/v/elixircloud/pubgrade-sidecar?sort=semver&label=image&color=C39BD3>
 [badge-docs]: <https://img.shields.io/readthedocs/pubgrade>
 [badge-license]: <https://img.shields.io/badge/license-Apache%202.0-blue.svg>
 [badge-url-build-status]: <https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/actions/workflows/ci.yml?query=branch%3Adev>

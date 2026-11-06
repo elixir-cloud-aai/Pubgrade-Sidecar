@@ -96,6 +96,20 @@ def test_incomplete_values_fail(settings: list[str], message: str) -> None:
     assert message in result.stderr
 
 
+def test_image_tag_defaults_to_app_version() -> None:
+    """Without a tag, the image of the chart's `appVersion` is deployed."""
+    chart = yaml.safe_load((CHART / "Chart.yaml").read_text(encoding="utf-8"))
+    spec = render()["Deployment"]["spec"]["template"]["spec"]
+    image = spec["containers"][0]["image"]
+    assert image == f"elixircloud/pubgrade-sidecar:{chart['appVersion']}"
+
+
+def test_image_tag_can_be_set() -> None:
+    """A tag that is set replaces the chart's `appVersion`."""
+    spec = render("image.tag=sha-abc")["Deployment"]["spec"]["template"]["spec"]
+    assert spec["containers"][0]["image"] == "elixircloud/pubgrade-sidecar:sha-abc"
+
+
 def test_role_is_minimal() -> None:
     """Test that the sidecar can only read and patch the target Deployments."""
     role = render("targetDeployments[1]=other")["Role"]
