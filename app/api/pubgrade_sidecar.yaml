@@ -1,7 +1,7 @@
 openapi: 3.0.2
 info:
   title: Sidecar service to update deployment on k8s-cluster
-  version: 2.0.0
+  version: 3.0.0
   description: >
     The project is to implement a microservice which would be co-deployed along
     with pubgrade in Kubernetes cluster at deployments to listen for update
@@ -132,6 +132,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/ContentTooLarge'
         '500':
           $ref: '#/components/responses/InternalServerError'
         default:
@@ -180,48 +182,55 @@ components:
       description: 'Bad Request
        ([RFC 7231](https://tools.ietf.org/html/rfc7235))'
       content:
-        application/json:
+        application/problem+json:
           schema:
             $ref: '#/components/schemas/Error'
     Unauthorized:
       description: 'Unauthorized
        ([RFC 7235](https://tools.ietf.org/html/rfc7235))'
       content:
-        application/json:
+        application/problem+json:
           schema:
             $ref: '#/components/schemas/Error'
     Forbidden:
       description: 'Forbidden
        ([RFC 7231](https://tools.ietf.org/html/rfc7231))'
       content:
-        application/json:
+        application/problem+json:
           schema:
             $ref: '#/components/schemas/Error'
     NotFound:
       description: 'Not found ([RFC 7231](https://tools.ietf.org/html/rfc7231))'
       content:
-        application/json:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ContentTooLarge:
+      description: 'The request body is larger than the configured limit
+       ([RFC 9110](https://www.rfc-editor.org/rfc/rfc9110))'
+      content:
+        application/problem+json:
           schema:
             $ref: '#/components/schemas/Error'
     Conflict:
       description: 'Another image repository, or one not on Docker Hub
        ([RFC 7231](https://tools.ietf.org/html/rfc7231))'
       content:
-        application/json:
+        application/problem+json:
           schema:
             $ref: '#/components/schemas/Error'
     InternalServerError:
       description: 'Internal server error
        ([RFC 7231](https://tools.ietf.org/html/rfc7231))'
       content:
-        application/json:
+        application/problem+json:
           schema:
             $ref: '#/components/schemas/Error'
     Error:
       description: 'Unexpected error
        ([RFC 7231](https://tools.ietf.org/html/rfc7231))'
       content:
-        application/json:
+        application/problem+json:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
@@ -300,15 +309,22 @@ components:
         - available_replicas
     Error:
       type: object
+      description: 'Problem details
+       ([RFC 9457](https://www.rfc-editor.org/rfc/rfc9457))'
       properties:
-        msg:
+        title:
           type: string
-          description: A short, human-readable description of the error.
-          example: 'An unexpected error occurred.'
-        status_code:
-          type: string
+          description: A short, human-readable summary of the type of problem.
+          example: 'Conflict'
+        status:
+          type: integer
           description: HTTP status code of the response.
-          example: '500'
+          example: 409
+        detail:
+          type: string
+          description: A human-readable explanation of this occurrence of the
+           problem.
+          example: 'The deployment uses another image repository.'
       required:
-        - msg
-        - status_code
+        - title
+        - status

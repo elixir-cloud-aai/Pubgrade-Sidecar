@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 import threading
-from typing import Any, Optional, cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from flask import Flask
@@ -40,7 +40,7 @@ def deployment(
     updated_replicas: int = 1,
     total_replicas: int = 1,
     available_replicas: int = 1,
-    conditions: Optional[list[dict[str, str]]] = None,
+    conditions: list[dict[str, str]] | None = None,
     uid: str = "uid-1",
 ) -> DefaultMunch:
     """Build a Deployment as returned by the Kubernetes client.
@@ -154,7 +154,7 @@ def test_parse_image(image: str, expected: Any) -> None:
 
 
 @pytest.mark.parametrize("token", [None, "wrong", "wröng"])
-def test_token_rejected(app: Flask, token: Optional[str]) -> None:
+def test_token_rejected(app: Flask, token: str | None) -> None:
     """Test that a missing or wrong token gets a 401, not a 500."""
     headers = {} if token is None else {"X-Access-Token": token.encode("utf-8")}
     with (

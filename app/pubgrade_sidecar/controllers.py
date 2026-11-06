@@ -8,7 +8,7 @@ import os
 import re
 import threading
 import time
-from typing import Any, NoReturn, Optional, cast
+from typing import Any, NoReturn, cast
 
 from flask import Response, jsonify, request
 from kubernetes import client, config
@@ -21,6 +21,7 @@ from pubgrade_sidecar.errors.exceptions import (
     Forbidden,
     ImageRegistryUnsupported,
     ImageRepositoryMismatch,
+    InternalServerError,
     NotFound,
     Unauthorized,
 )
@@ -78,9 +79,9 @@ class _Delivery:
 
     image: str
     state: str = "waiting_for_image"
-    detail: Optional[str] = None
+    detail: str | None = None
     generation: int = 0
-    uid: Optional[str] = None
+    uid: str | None = None
 
 
 # The last delivery per deployment, in memory: the sidecar has one replica. A
@@ -107,7 +108,7 @@ def _check_token() -> None:
         raise Unauthorized
 
 
-def _parse_image(image: str) -> tuple[str, Optional[str]]:
+def _parse_image(image: str) -> tuple[str, str | None]:
     """Split an image into its canonical repository and its tag.
 
     Args:
@@ -153,13 +154,15 @@ def _raise_api_error(exc: ApiException) -> NoReturn:
     Raises:
         NotFound: If the object doesn't exist.
         Forbidden: If the sidecar has no right to access it.
-        ApiException: For other errors, which are no client errors.
+        InternalServerError: For other errors, which are no client errors
+            (not with the status of the Kubernetes API, which FOCA would
+            otherwise return, e.g., `503`).
     """
     if exc.status == 404:
         raise NotFound
     if exc.status == 403:
         raise Forbidden
-    raise exc
+    raise InternalServerError from exc
 
 
 def _read_deployment(deployment_name: str) -> tuple[Any, str]:
@@ -174,9 +177,12 @@ def _read_deployment(deployment_name: str) -> tuple[Any, str]:
     Raises:
         NotFound: If there is no such deployment, or it has no container.
         Forbidden: If the sidecar has no right to read it.
-        ApiException: For other errors of the Kubernetes API, which are no
-            client errors.
+        InternalServerError: For other errors of the Kubernetes API, which are
+            no client errors.
     """
+    # The client's models type all fields as optional; the API server sets
+    # those that are read here
+    deployment: Any
     try:
         deployment = apiV1.read_namespaced_deployment(
             deployment_name, namespace, _request_timeout=REQUEST_TIMEOUT
@@ -229,6 +235,7 @@ def getDeployment() -> list[str]:
         Forbidden: If the sidecar has no right to list the deployments.
     """
     _check_token()
+    pod_list: Any
     try:
         pod_list = apiV1.list_namespaced_deployment(
             namespace, _request_timeout=REQUEST_TIMEOUT
@@ -416,7 +423,7 @@ def _deliver(
         if not _wait_for_image(image_repo, image_tag, delivery, deployment_name):
             logger.info("Skipping a superseded delivery.")
             return
-        patched = apiV1.patch_namespaced_deployment(
+        patched: Any = apiV1.patch_namespaced_deployment(
             name=deployment_name,
             namespace=namespace,
             body=patch,

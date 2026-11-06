@@ -17,7 +17,11 @@ from werkzeug.exceptions import (
 
 
 class DockerImageUnavailable(NotFound):
-    """Raised when object with given image is not found."""
+    """Raised when the image of a notification isn't on Docker Hub.
+
+    Only raised in the background, while a delivery waits for the image, so
+    never returned to clients.
+    """
 
     pass
 
@@ -34,57 +38,68 @@ class ImageRegistryUnsupported(Conflict):
     pass
 
 
+# Problem details (RFC 9457) of the exceptions, by class (`exceptions.mapping`
+# in the configuration); exceptions that aren't listed get those of their
+# closest listed base class
 exceptions = {
     Exception: {
-        "msg": "An unexpected error occurred.",
-        "status_code": "500",
+        "title": "Internal Server Error",
+        "status": 500,
+        "detail": "An unexpected error occurred.",
     },
     BadRequest: {
-        "msg": "The request is invalid.",
-        "status_code": "400",
+        "title": "Bad Request",
+        "status": 400,
+        "detail": "The request is invalid.",
     },
     BadRequestProblem: {
-        "msg": "The request is invalid.",
-        "status_code": "400",
+        "title": "Bad Request",
+        "status": 400,
+        "detail": "The request is invalid.",
     },
     ExtraParameterProblem: {
-        "msg": "The request is invalid.",
-        "status_code": "400",
+        "title": "Bad Request",
+        "status": 400,
+        "detail": "The request is invalid.",
     },
     UnsupportedMediaTypeProblem: {
-        "msg": "The media type is not supported.",
-        "status_code": "415",
+        "title": "Unsupported Media Type",
+        "status": 415,
+        "detail": "The media type is not supported.",
     },
     MethodNotAllowed: {
-        "msg": "The method is not allowed.",
-        "status_code": "405",
+        "title": "Method Not Allowed",
+        "status": 405,
+        "detail": "The method is not allowed.",
     },
     Forbidden: {
-        "msg": "The sidecar may not access this deployment.",
-        "status_code": "403",
+        "title": "Forbidden",
+        "status": 403,
+        "detail": "The sidecar may not access this deployment.",
     },
     ImageRegistryUnsupported: {
-        "msg": "Only images on Docker Hub can be rolled out.",
-        "status_code": "409",
+        "title": "Conflict",
+        "status": 409,
+        "detail": "Only images on Docker Hub can be rolled out.",
     },
     ImageRepositoryMismatch: {
-        "msg": "The deployment uses another image repository.",
-        "status_code": "409",
+        "title": "Conflict",
+        "status": 409,
+        "detail": "The deployment uses another image repository.",
     },
     Unauthorized: {
-        "msg": "The request is unauthorized.",
-        "status_code": "401",
+        "title": "Unauthorized",
+        "status": 401,
+        "detail": "The request is unauthorized.",
     },
     InternalServerError: {
-        "msg": "An unexpected error occurred",
-        "status_code": "500",
+        "title": "Internal Server Error",
+        "status": 500,
+        "detail": "An unexpected error occurred.",
     },
     NotFound: {
-        "msg": "The requested resource wasn't found.",
-        "status_code": "404",
-    },
-    DockerImageUnavailable: {
-        "msg": "The requested Image is not found.",
-        "status_code": "409",
+        "title": "Not Found",
+        "status": 404,
+        "detail": "The requested resource wasn't found.",
     },
 }

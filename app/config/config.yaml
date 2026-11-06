@@ -1,25 +1,39 @@
+# FOCA configuration, validated by FOCA on startup
+# Cf. https://foca.readthedocs.io/en/latest/configuration/
+
+# Server configuration
+# Cf. https://foca.readthedocs.io/en/latest/configuration/server/
+# `host` and `port` apply to the development server
+# (`python -m pubgrade_sidecar.app`) only: the image serves the app with
+# Gunicorn on port 8080 (FOCA's `foca.gunicorn_config`)
 server:
     host: '0.0.0.0'
     port: 8080
+    # Debug mode allows executing arbitrary code; only enable it for local
+    # development, on a loopback host
     debug: False
-    environment: production
     testing: False
-    use_reloader: False
+    # Size limit of request bodies, in bytes (64 KiB); notifications have a
+    # few dozen. Larger requests (also chunked ones) are rejected with
+    # `413 Content Too Large` before they are read
+    max_content_length: 65536
 
+# API specifications, by name; paths are relative to this file
+# Cf. https://foca.readthedocs.io/en/latest/configuration/api/
 api:
     specs:
-        - path: api/pubgrade_sidecar.yaml
-          append: null
-          add_operation_fields:
-              x-openapi-router-controller:  pubgrade_sidecar.controllers
-          connexion:
-              strict_validation: True
-              validate_responses: False
-              options:
-                  swagger_ui: True
-                  serve_spec: True
+        sidecar:
+            path: ../api/pubgrade_sidecar.yaml
+            add_operation_fields:
+                x-openapi-router-controller: pubgrade_sidecar.controllers
+            connexion:
+                strict_validation: True
+                validate_responses: False
+                options:
+                    swagger_ui: True
+                    serve_spec: True
 
+# Errors are returned as problem details (RFC 9457)
+# Cf. https://foca.readthedocs.io/en/latest/configuration/exceptions/
 exceptions:
-     required_members: [['msg'], ['status_code']]
-     status_member: ['status_code']
-     exceptions: pubgrade_sidecar.errors.exceptions.exceptions
+    mapping: pubgrade_sidecar.errors.exceptions.exceptions
