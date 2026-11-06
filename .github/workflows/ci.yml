@@ -133,8 +133,9 @@ jobs:
           fail_ci_if_error: ${{ github.repository_owner == 'elixir-cloud-aai' }}
           verbose: true
 
-  # Builds the documentation (`mkdocs.yml`) as Read the Docs does
-  # (`.readthedocs.yaml`), from the dependency group `docs` of the lock
+  # Builds the documentation (`mkdocs.yml`) strictly, from the dependency
+  # group `docs` of the lock; it is published as part of Pubgrade's
+  # documentation, whose build pulls in `docs/`
   docs:
     name: Docs
     runs-on: ubuntu-latest

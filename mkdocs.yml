@@ -1,16 +1,16 @@
 site_name: Pubgrade-Sidecar
 site_description: >-
   Updates the image tags of Kubernetes Deployments when Pubgrade notifies it
-# Read the Docs serves each version under its own path (e.g., `/en/latest/`)
-site_url: !ENV [READTHEDOCS_CANONICAL_URL, "https://pubgrade-sidecar.readthedocs.io/en/latest/"]
+# Published as a section of Pubgrade's documentation, whose build pulls in
+# `docs/`; this configuration only builds the pages here, strictly, in CI
+site_url: https://pubgrade.readthedocs.io/en/latest/sidecar/
 repo_url: https://github.com/elixir-cloud-aai/Pubgrade-Sidecar
 repo_name: elixir-cloud-aai/Pubgrade-Sidecar
 edit_uri: edit/dev/docs/
 copyright: Copyright &copy; ELIXIR On-Cloud
 
-# Files included in pages (`pymdownx.snippets`)
+# The code reference is generated from the docstrings
 watch:
-  - README.md
   - app/pubgrade_sidecar
 
 theme:
@@ -43,11 +43,6 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
-  # Sections of `README.md` (between `--8<-- [start:<name>]` and
-  # `--8<-- [end:<name>]`), so that they are not written twice; fails if a
-  # file or section is missing
-  - pymdownx.snippets:
-      check_paths: true
   - pymdownx.superfences
   - tables
   - toc:
