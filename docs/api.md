@@ -35,8 +35,9 @@ curl --location --request PUT 'https://{sidecar-host}/deployment/{deployment-nam
   --data-raw '{"image_name": "elixircloud/tesk-api", "tag": "1.2.0"}'
 ```
 
-A notification returns at once, with status 202; the rollout runs in the
-background. Only the tag can change, and `docker.io/<repository>` and
+A notification of a new image returns at once, with status 202; the rollout
+runs in the background. If the deployment already uses the image, it returns
+200 and nothing happens. Only the tag can change, and `docker.io/<repository>` and
 `<repository>` count as the same repository. The sidecar waits for the image
 on Docker Hub, about two minutes at most, so only images hosted there can be
 rolled out. Use a new tag for every release: a tag that the deployment already
