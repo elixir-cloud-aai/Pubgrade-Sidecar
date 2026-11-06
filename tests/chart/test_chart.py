@@ -102,6 +102,10 @@ def test_image_tag_defaults_to_app_version() -> None:
     spec = render()["Deployment"]["spec"]["template"]["spec"]
     image = spec["containers"][0]["image"]
     assert image == f"elixircloud/pubgrade-sidecar:{chart['appVersion']}"
+
+
+def test_image_tag_can_be_set() -> None:
+    """A tag that is set replaces the chart's `appVersion`."""
     spec = render("image.tag=sha-abc")["Deployment"]["spec"]["template"]["spec"]
     assert spec["containers"][0]["image"] == "elixircloud/pubgrade-sidecar:sha-abc"
 

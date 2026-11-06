@@ -84,6 +84,10 @@ tag) and `version` (the SemVer form, e.g., `1.2.3-rc1` for `1.2.3rc1`), and
 the version in `CITATION.cff`. Until 1.0.0, all releases are GitHub
 pre-releases.
 
+For the first release, the chart's `version` (0.2.0, from before the
+release workflow) and the app's version (0.1.0) differ; the release-prep pull
+request sets both, e.g., to 0.2.0.
+
 1. Release-prep pull request to `dev`: set the version in `pyproject.toml`,
    `deployment/Chart.yaml` (`version` and `appVersion`) and `CITATION.cff`
    (`python scripts/citation.py set <version>`, which also sets the release
@@ -101,11 +105,16 @@ packages the chart, pushes the image by digest, scans it, then attests and
 signs the image and the chart, tags the image `X.Y.Z` (and `latest` if it is
 the highest stable release; `scripts/release_version.py`) and creates the
 GitHub release, with the chart and its Sigstore bundle attached and GitHub's
-generated notes, which are then edited into the agreed format. Pushing the
+generated notes (for a first release, built by `scripts/release_notes.py`,
+as GitHub would start at an older tag of its own choice). Edit the notes by
+hand into the agreed format after publishing: the notes of immutable
+releases stay editable, their assets don't. Pushing the
 image and publishing the release each need approval in the environment
 `release`. Releases are immutable, so the release is created as a draft,
 gets its assets and is published last (`scripts/release_assets.py`); a
-re-run of failed jobs finishes it. The scan of the release image doesn't
+re-run of failed jobs finishes it. Don't re-run all jobs of a release that
+was published: that builds a new image digest and moves the release's image
+tags to it before it fails at the release. The scan of the release image doesn't
 fail the release for now, nor does the weekly scan of `latest`
 (`.github/workflows/scan.yml`): the base image has many known
 vulnerabilities, which only moving to a newer FOCA image removes.
