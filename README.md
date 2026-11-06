@@ -26,10 +26,10 @@ for that commit rebuilds it).
 
 Publishing runs in the environment `dev-images` and needs the Docker Hub
 secrets `DOCKERHUB_LOGIN` and `DOCKERHUB_TOKEN` (organization secrets); the
-environment allows only the branch `dev`. A fork publishes to its own Docker Hub organization
-once it sets these secrets and the Actions variable `DOCKERHUB_ORG` (for the
-repository or organization, not the environment); otherwise it skips
-publishing. To deploy a fork's image, set `image.repository` to
+environment allows only the branch `dev`. A fork publishes to its own Docker
+Hub organization once it sets these secrets and the Actions variable
+`DOCKERHUB_ORG` (for the repository or organization, not the environment);
+otherwise it skips publishing. To deploy a fork's image, set `image.repository` to
 `<organization>/pubgrade-sidecar`.
 <!-- --8<-- [end:image] -->
 
