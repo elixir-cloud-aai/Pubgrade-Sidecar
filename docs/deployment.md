@@ -93,12 +93,13 @@ path in `REGISTRY_AUTH_FILE`. Only its `auths` entries are read, with `auth` or
 `username` and `password` (not credential helpers or identity tokens). If the
 registry names a token service, as Docker Hub and Harbor do, the credentials go
 to that service, as with Docker's own client, but only over HTTPS (or to an
-insecure registry itself). The sidecar only reads them to check images; the
-cluster pulls the images with the Deployments' own `imagePullSecrets`.
-Registries that serve only HTTP, e.g., one in the cluster, go in
-`insecureRegistries` (`host` or `host:port`; environment variable
-`INSECURE_REGISTRIES`, comma-separated); credentials for them are sent
-unencrypted.
+insecure registry itself); token services over HTTP aren't used otherwise, and
+neither are challenges after a redirect to another host or from HTTPS to HTTP.
+The sidecar only uses the credentials to check images; the cluster pulls images with
+the Deployments' own `imagePullSecrets`. Registries that serve only HTTP, e.g.,
+one in the cluster, go in `insecureRegistries` (`host` or `host:port`;
+environment variable `INSECURE_REGISTRIES`, comma-separated); credentials for
+them are sent unencrypted.
 
 ## Changed image tags (November 2026)
 

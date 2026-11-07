@@ -84,6 +84,7 @@ MANIFEST_TYPES = ", ".join(
 )
 # Largest response of a token service that is read, in bytes
 MAX_TOKEN_RESPONSE = 256 * 1024
+TOKEN_CHUNK_SIZE = 4096
 # Parameters of an authentication challenge (`WWW-Authenticate`)
 CHALLENGE_PARAMETER = re.compile(r'(\w+)="([^"]*)"')
 # The format of Docker image tags
@@ -857,9 +858,10 @@ def _insecure_registries() -> list[str]:
 def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
     """Request a token from the token service that a registry names.
 
-    Credentials (see `_credentials`) are sent only to a token service over
-    HTTPS, as with Docker's own client, or to an insecure registry itself.
-    The response is read up to `MAX_TOKEN_RESPONSE` bytes.
+    Only token services over HTTPS are asked, as with Docker's own client,
+    or an insecure registry itself, with the registry's credentials (see
+    `_credentials`), if any. The response is read up to `MAX_TOKEN_RESPONSE`
+    bytes (plus at most one chunk), for `REQUEST_TIMEOUT` seconds in all.
 
     Args:
         fields: Parameters of the registry's challenge, with `realm`, the
@@ -876,15 +878,18 @@ def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
         AttributeError: If the response isn't a JSON object.
     """
     realm = fields["realm"]
-    if not realm.startswith(("https://", "http://")):
+    # Over HTTP, only an insecure registry's own token service, as the token
+    # (and credentials) would travel unencrypted
+    if not (
+        realm.startswith("https://")
+        or (scheme == "http" and realm.startswith(f"http://{host}/"))
+    ):
         return None
-    trusted = realm.startswith("https://") or (
-        scheme == "http" and realm.startswith(f"http://{host}/")
-    )
+    deadline = time.monotonic() + REQUEST_TIMEOUT
     token_response = requests.get(
         realm,
         params={key: fields[key] for key in ("service", "scope") if key in fields},
-        auth=_credentials(host) if trusted else None,
+        auth=_credentials(host),
         timeout=REQUEST_TIMEOUT,
         stream=True,
     )
@@ -892,9 +897,10 @@ def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
         if token_response.status_code != 200:
             return None
         content = b""
-        for chunk in token_response.iter_content(chunk_size=65536):
+        for chunk in token_response.iter_content(chunk_size=TOKEN_CHUNK_SIZE):
             content += chunk
-            if len(content) > MAX_TOKEN_RESPONSE:
+            # Also a service that trickles its response stops in time
+            if len(content) > MAX_TOKEN_RESPONSE or time.monotonic() > deadline:
                 return None
     finally:
         token_response.close()
@@ -907,8 +913,9 @@ def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
     """Ask a registry for a manifest, and authenticate if it asks for it.
 
     Redirects are followed; `requests` drops the authorization on redirects
-    to other hosts. Only challenges of the registry itself are answered, so
-    that a host it redirects to can't ask for its credentials.
+    to other hosts or from HTTPS to HTTP. Only challenges of the registry
+    itself, with the scheme it was asked with, are answered, so that a host
+    it redirects to can't ask for its credentials.
 
     Args:
         url: URL of the manifest.
@@ -930,7 +937,8 @@ def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
     )
     if response.status_code != 401:
         return response
-    if response.history and urlsplit(response.url).netloc != host:
+    final = urlsplit(response.url) if response.history else None
+    if final and (final.scheme, final.netloc) != (scheme, host):
         return response
     kind, _, parameters = response.headers.get("WWW-Authenticate", "").partition(" ")
     fields = dict(CHALLENGE_PARAMETER.findall(parameters))

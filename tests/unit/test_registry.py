@@ -204,15 +204,15 @@ def test_credentials_not_sent_in_plain_text(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Test that credentials aren't sent to a token service over HTTP."""
+    """Test that token services over HTTP aren't asked by HTTPS registries."""
     auth_file(
         tmp_path,
         monkeypatch,
         {"auths": {"harbor.example.org": {"username": "user", "password": "pw"}}},
     )
     mock_head.side_effect = [bearer("http://auth.example.org/token"), response(200)]
-    assert check_image_availability("harbor.example.org/org/app", "1")
-    assert mock_get.call_args.kwargs["auth"] is None
+    assert not check_image_availability("harbor.example.org/org/app", "1")
+    mock_get.assert_not_called()
 
 
 @patch(GET, return_value=response(200, body={"token": "abc"}))
@@ -506,3 +506,45 @@ def test_challenge_after_redirect_unanswered(
         "localhost",
     ]
     assert all(authorization is None for _, authorization in _Recorder.seen)
+
+
+@patch(GET)
+@patch(HEAD)
+def test_challenge_after_downgrade_unanswered(
+    mock_head: MagicMock, mock_get: MagicMock
+) -> None:
+    """Test that a redirect from HTTPS to HTTP gets no token."""
+    challenge = bearer()
+    challenge.history = [response(307)]
+    challenge.url = "http://harbor.example.org/v2/org/app/manifests/1"
+    mock_head.return_value = challenge
+    assert not check_image_availability("harbor.example.org/org/app", "1")
+    mock_get.assert_not_called()
+
+
+@patch(GET, return_value=response(200, body={"token": "abc"}))
+@patch(HEAD)
+def test_challenge_after_redirect_on_registry(
+    mock_head: MagicMock, mock_get: MagicMock
+) -> None:
+    """Test that a redirect within the registry keeps its challenge."""
+    challenge = bearer()
+    challenge.history = [response(307)]
+    challenge.url = "https://harbor.example.org/v2/org/app/manifests/1"
+    mock_head.side_effect = [challenge, response(200)]
+    assert check_image_availability("harbor.example.org/org/app", "1")
+
+
+@patch(HEAD)
+def test_token_response_too_slow(
+    mock_head: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that a token service that trickles its response is cut off."""
+    mock_head.side_effect = [bearer(), response(200)]
+    token_response = response(200)
+    token_response.iter_content.return_value = iter([b" "] * 3)
+    clock = iter([0.0, 5.0, 11.0, 12.0])
+    monkeypatch.setattr(controllers.time, "monotonic", lambda: next(clock))
+    with patch(GET, return_value=token_response):
+        assert not check_image_availability("org/app", "1")
+    assert mock_head.call_count == 1
