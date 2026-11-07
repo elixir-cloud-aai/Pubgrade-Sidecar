@@ -351,6 +351,7 @@ def test_all_deployments_read_fails(
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
 @patch(CHECK, return_value=True)
 @patch(LIST)
+@patch(READ, new=read)
 def test_all_deployments_listed_without_targets(
     mock_list: MagicMock,
     mock_check: MagicMock,
@@ -524,3 +525,52 @@ def test_status_reports_failure_of_any_repository(
     report = status_of(app, "tesk-api")
     assert report["status"] == "rolling_out"
     assert report["requested_image"] == "mongo:7.0"
+
+
+@patch(PATCH, side_effect=ApiException(status=422))
+@patch(CHECK, return_value=True)
+@patch(READ, new=read)
+def test_changed_container_fails_the_delivery(
+    mock_check: MagicMock, mock_patch: MagicMock, app: Flask
+) -> None:
+    """Test that a patch whose test fails is reported as a failed delivery."""
+    _, code = notify_one(app, "tesk-api")
+    assert code == 202
+    report = status_of(app, "tesk-api")
+    assert report["status"] == "failed"
+    assert report["detail"] == "Deployment could not be updated."
+
+
+@patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS["tesk-worker"])
+@patch(CHECK, return_value=True)
+@patch(READ)
+def test_tests_follow_the_current_tag(
+    mock_read: MagicMock,
+    mock_check: MagicMock,
+    mock_patch: MagicMock,
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that a patch since planning changes only the tested tag.
+
+    E.g., an older delivery of the same repository that patched the deployment
+    while the newer notification was planned. A container that now has another
+    repository keeps the planned test, so that the patch fails.
+    """
+    executor = DeferredExecutor()
+    monkeypatch.setattr(controllers, "_executor", executor)
+    mock_read.return_value = deployment(
+        "tesk-worker", [f"{REPOSITORY}:1.0.0", f"{REPOSITORY}:1.0.0"]
+    )
+    assert notify_one(app, "tesk-worker")[1] == 202
+    mock_read.return_value = deployment(
+        "tesk-worker", [f"{REPOSITORY}:1.1.0", "other/proxy:1.0"]
+    )
+    executor.run()
+    body = mock_patch.call_args.kwargs["body"]
+    assert [operation["value"] for operation in body] == [
+        f"{REPOSITORY}:1.1.0",
+        f"{REPOSITORY}:1.2.0",
+        f"{REPOSITORY}:1.0.0",
+        f"{REPOSITORY}:1.2.0",
+    ]

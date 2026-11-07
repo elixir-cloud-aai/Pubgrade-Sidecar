@@ -141,8 +141,8 @@ notification per repository, so that they don't replace each other. A failed
 delivery of any of them, then a waiting one, counts over the deployment's own
 status, and `requested_image` names its image; otherwise `requested_image` is
 the image of the last notification. A delivery fails, without changing the
-deployment, if a container to update no longer has the image it had when the
-notification arrived, e.g., after an upgrade by hand.
+deployment, if a container to update no longer uses the image repository it used
+when the notification arrived, e.g., after its containers were reordered.
 
 `requested_image` and `detail` are kept in memory: a restart loses a notification
 that is still waiting for its image, without a report. Afterwards, `status` only

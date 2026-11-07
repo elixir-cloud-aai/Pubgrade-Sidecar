@@ -659,7 +659,7 @@ def _deliver(
             patched: Any = apiV1.patch_namespaced_deployment(
                 name=deployment_name,
                 namespace=namespace,
-                body=patch,
+                body=_current_tests(deployment_name, patch),
                 _request_timeout=REQUEST_TIMEOUT,
             )
             with _lock:
@@ -672,6 +672,40 @@ def _deliver(
     except Exception:
         logger.exception("Deployment could not be updated.")
         _fail(delivery, "Deployment could not be updated.")
+
+
+def _current_tests(
+    deployment_name: str, patch: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    """Update the tests of a JSON patch to the deployment as it is now.
+
+    A delivery that patched the deployment since the notification was planned
+    (e.g., an older one of the same image repository) changed the tag of the
+    containers to update: their tests then expect the current image, as long
+    as it is of the same repository. A container that now has another
+    repository (e.g., after the containers were reordered) keeps the planned
+    test, which fails the patch.
+
+    Args:
+        deployment_name: Name of the deployment.
+        patch: JSON patch for the deployment.
+
+    Returns:
+        The patch, with the tests updated.
+    """
+    deployment, _ = _read_deployment(deployment_name)
+    containers = deployment.spec.template.spec.containers
+    updated = []
+    for operation in patch:
+        current = operation
+        if operation["op"] == "test":
+            index = int(operation["path"].split("/")[-2])
+            if index < len(containers):
+                image = containers[index].image
+                if _parse_image(image)[0] == _parse_image(operation["value"])[0]:
+                    current = {**operation, "value": image}
+        updated.append(current)
+    return updated
 
 
 def _fail(delivery: _Delivery, detail: str) -> None:
