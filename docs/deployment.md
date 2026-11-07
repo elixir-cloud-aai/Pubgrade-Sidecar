@@ -84,6 +84,16 @@ with its default tag) to follow development, switch to `sha-<commit>` (or
 `dev`), or to a release once there is one; until the first release, set
 `image.tag` when you install the chart (see above).
 
+## Upgrading to version 3.1.0 of the API
+
+Version 3.1.0 of the API adds `PUT /deployment`, for all deployments that use
+an image repository (see [API](api.md)), and the chart value
+`deploymentLabel`. Existing calls stay, with one change:
+`PUT /deployment/{deployment-name}` updates every container of the
+deployment whose image repository equals `image_name`. Before, it updated
+only the first container, and answered 409 if that one used another
+repository; now a 409 means that no container uses it.
+
 ## Upgrading to version 3.0.0 of the API
 
 Version 3.0.0 of the API (November 2026) runs on FOCA 0.21 and Python 3.13

@@ -154,13 +154,16 @@ def notify_all(app: Flask, image_name: str = REPOSITORY, tag: str = "1.2.0") -> 
         return controllers.updateDeployments()
 
 
-def notify_one(app: Flask, name: str, image_name: str = REPOSITORY) -> Any:
+def notify_one(
+    app: Flask, name: str, image_name: str = REPOSITORY, tag: str = "1.2.0"
+) -> Any:
     """Send a notification for one deployment.
 
     Args:
         app: Flask app.
         name: Name of the deployment.
         image_name: Image repository of the notification.
+        tag: Tag of the notification.
 
     Returns:
         Return value of the controller.
@@ -168,7 +171,7 @@ def notify_one(app: Flask, name: str, image_name: str = REPOSITORY) -> Any:
     with app.test_request_context(
         "url",
         headers={"X-Access-Token": TOKEN},
-        json={"image_name": image_name, "tag": "1.2.0"},
+        json={"image_name": image_name, "tag": tag},
     ):
         return controllers.updateDeployment(name)
 
@@ -185,21 +188,22 @@ def patches(mock_patch: MagicMock) -> dict[str, list[dict[str, str]]]:
     return {call.kwargs["name"]: call.kwargs["body"] for call in mock_patch.mock_calls}
 
 
-def replace(index: int, image: str) -> dict[str, str]:
-    """Build the patch operation for the image of one container.
+def replace(index: int, old: str, new: str) -> list[dict[str, str]]:
+    """Build the patch operations for the image of one container.
 
     Args:
         index: Index of the container.
-        image: New image.
+        old: Image that the container must still have.
+        new: New image.
 
     Returns:
-        The operation.
+        The operations: a test of the current image, then its replacement.
     """
-    return {
-        "op": "replace",
-        "value": image,
-        "path": f"/spec/template/spec/containers/{index}/image",
-    }
+    path = f"/spec/template/spec/containers/{index}/image"
+    return [
+        {"op": "test", "value": old, "path": path},
+        {"op": "replace", "value": new, "path": path},
+    ]
 
 
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
@@ -214,8 +218,10 @@ def test_one_deployment_all_containers(
     assert response.json["image"] == f"{REPOSITORY}:1.2.0"
     assert patches(mock_patch) == {
         "tesk-api": [
-            replace(1, f"{REPOSITORY}:1.2.0"),
-            replace(2, f"docker.io/{REPOSITORY}:1.2.0"),
+            *replace(1, f"{REPOSITORY}:1.1.0", f"{REPOSITORY}:1.2.0"),
+            *replace(
+                2, f"docker.io/{REPOSITORY}:1.1.0", f"docker.io/{REPOSITORY}:1.2.0"
+            ),
         ]
     }
 
@@ -246,10 +252,12 @@ def test_all_deployments(
     ]
     assert patches(mock_patch) == {
         "tesk-api": [
-            replace(1, f"{REPOSITORY}:1.2.0"),
-            replace(2, f"docker.io/{REPOSITORY}:1.2.0"),
+            *replace(1, f"{REPOSITORY}:1.1.0", f"{REPOSITORY}:1.2.0"),
+            *replace(
+                2, f"docker.io/{REPOSITORY}:1.1.0", f"docker.io/{REPOSITORY}:1.2.0"
+            ),
         ],
-        "tesk-worker": [replace(0, f"{REPOSITORY}:1.2.0")],
+        "tesk-worker": replace(0, f"{REPOSITORY}:1.1.0", f"{REPOSITORY}:1.2.0"),
     }
     with app.test_request_context("url", headers={"X-Access-Token": TOKEN}):
         report = cast(dict[str, Any], controllers.getImage("tesk-worker").json)
@@ -389,3 +397,130 @@ def test_all_deployments_rejected_up_front(
     with pytest.raises(error):
         notify_all(app, image_name=image_name, tag=tag)
     mock_read.assert_not_called()
+
+
+class DeferredExecutor:
+    """Executor that keeps submitted functions until they are run."""
+
+    def __init__(self) -> None:
+        """Start without functions."""
+        self.pending: list[tuple[Any, tuple[Any, ...]]] = []
+
+    def submit(self, function: Any, *args: Any) -> None:
+        """Keep a function.
+
+        Args:
+            function: Function to run.
+            *args: Positional arguments of the function.
+        """
+        self.pending.append((function, args))
+
+    def run(self) -> None:
+        """Run the kept functions, in order."""
+        for function, args in self.pending:
+            function(*args)
+
+
+def status_of(app: Flask, name: str) -> dict[str, Any]:
+    """Get the status report of a deployment.
+
+    Args:
+        app: Flask app.
+        name: Name of the deployment.
+
+    Returns:
+        The report.
+    """
+    with app.test_request_context("url", headers={"X-Access-Token": TOKEN}):
+        return cast(dict[str, Any], controllers.getImage(name).json)
+
+
+@patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
+@patch(CHECK, return_value=True)
+@patch(READ, new=read)
+def test_repositories_of_one_deployment_dont_replace_each_other(
+    mock_check: MagicMock,
+    mock_patch: MagicMock,
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that a notification for another repository keeps a pending one."""
+    executor = DeferredExecutor()
+    monkeypatch.setattr(controllers, "_executor", executor)
+    assert notify_one(app, "tesk-api")[1] == 202
+    # A notification for an image in use ends no delivery of another repository
+    assert notify_one(app, "tesk-api", image_name="other/proxy", tag="1.0")[1] == 200
+    assert notify_one(app, "tesk-api", image_name="other/proxy")[1] == 202
+    executor.run()
+    applied = [
+        operation["value"]
+        for call in mock_patch.mock_calls
+        for operation in call.kwargs["body"]
+        if operation["op"] == "replace"
+    ]
+    assert applied == [
+        f"{REPOSITORY}:1.2.0",
+        f"docker.io/{REPOSITORY}:1.2.0",
+        "other/proxy:1.2.0",
+    ]
+
+
+@patch(PATCH)
+@patch(CHECK, return_value=False)
+@patch("pubgrade_sidecar.controllers.time.sleep")
+@patch(READ)
+def test_status_needs_every_target_container(
+    mock_read: MagicMock,
+    mock_sleep: MagicMock,
+    mock_check: MagicMock,
+    mock_patch: MagicMock,
+    app: Flask,
+) -> None:
+    """Test that a failure counts while one target container lacks the image."""
+    mock_read.return_value = deployment(
+        "tesk-api", [f"{REPOSITORY}:1.2.0", f"docker.io/{REPOSITORY}:1.1.0"]
+    )
+    _, code = notify_one(app, "tesk-api")
+    assert code == 202
+    report = status_of(app, "tesk-api")
+    assert report["status"] == "failed"
+    assert report["detail"]
+    mock_patch.assert_not_called()
+
+
+@patch(PATCH)
+@patch(READ, new=read)
+def test_status_reports_failure_of_any_repository(
+    mock_patch: MagicMock, app: Flask
+) -> None:
+    """Test that a failed delivery counts over a newer waiting or patched one."""
+    failed = controllers._Delivery(
+        image=f"{REPOSITORY}:1.2.0",
+        state="failed",
+        detail="Image not available.",
+        targets=[(1, f"{REPOSITORY}:1.2.0")],
+    )
+    waiting = controllers._Delivery(
+        image="other/proxy:1.1.0", targets=[(0, "other/proxy:1.1.0")]
+    )
+    # Patched, and the Deployment has moved past it
+    patched = controllers._Delivery(
+        image="mongo:7.0", state="patched", generation=1, uid="uid-tesk-api"
+    )
+    controllers._deliveries[("tesk-api", REPOSITORY)] = failed
+    controllers._deliveries[("tesk-api", "other/proxy")] = waiting
+    controllers._deliveries[("tesk-api", "library/mongo")] = patched
+    report = status_of(app, "tesk-api")
+    assert report["status"] == "failed"
+    assert report["requested_image"] == f"{REPOSITORY}:1.2.0"
+    assert report["detail"] == "Image not available."
+    del controllers._deliveries[("tesk-api", REPOSITORY)]
+    report = status_of(app, "tesk-api")
+    assert report["status"] == "waiting_for_image"
+    assert report["requested_image"] == "other/proxy:1.1.0"
+    assert "detail" not in report
+    del controllers._deliveries[("tesk-api", "other/proxy")]
+    patched.generation = 3
+    report = status_of(app, "tesk-api")
+    assert report["status"] == "rolling_out"
+    assert report["requested_image"] == "mongo:7.0"

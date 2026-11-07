@@ -236,7 +236,12 @@ def test_notify_patches_tag(
     assert response.json["image"] == expected
     mock_check.assert_called_once_with("elixircloud/tesk-api", "1.2.0")
     body = mock_patch.call_args.kwargs["body"]
-    assert body[0]["value"] == expected
+    assert body[0] == {
+        "op": "test",
+        "value": current,
+        "path": "/spec/template/spec/containers/0/image",
+    }
+    assert body[1]["value"] == expected
 
 
 @patch(PATCH)
@@ -343,7 +348,7 @@ def test_newer_notification_wins(
             function(*args)
     mock_patch.assert_called_once()
     body = mock_patch.call_args.kwargs["body"]
-    assert body[0]["value"] == "elixircloud/tesk-api:1.3.0"
+    assert body[1]["value"] == "elixircloud/tesk-api:1.3.0"
 
 
 @pytest.mark.parametrize(
@@ -474,7 +479,9 @@ def test_notify_current_image(
 ) -> None:
     """Test that the image in use leads to no rollout, and replaces older ones."""
     monkeypatch.setattr(controllers, "_executor", ImmediateExecutor())
-    controllers._deliveries["tesk-api"] = controllers._Delivery(image="older")
+    controllers._deliveries[("tesk-api", "elixircloud/tesk-api")] = (
+        controllers._Delivery(image="older")
+    )
     response, code = notify(app, "elixircloud/tesk-api", tag="1.2.0")
     assert code == 200
     assert "already" in response.json["message"]
@@ -523,7 +530,9 @@ def test_superseded_delivery_stops_waiting(
 
     def replace_delivery(image_name: str, tag: str) -> bool:
         calls.append(tag)
-        controllers._deliveries["tesk-api"] = controllers._Delivery(image="other")
+        controllers._deliveries[("tesk-api", "elixircloud/tesk-api")] = (
+            controllers._Delivery(image="other")
+        )
         return False
 
     mock_check.side_effect = replace_delivery
@@ -559,11 +568,11 @@ def test_delivery_superseded_after_wait_does_not_patch(mock_patch: MagicMock) ->
     """
     older = controllers._Delivery(image="elixircloud/tesk-api:1.2.0")
     newer = controllers._Delivery(image="elixircloud/tesk-api:1.3.0")
-    controllers._deliveries["tesk-api"] = older
+    controllers._deliveries[("tesk-api", "elixircloud/tesk-api")] = older
 
     def replaced_after_wait(*_: Any) -> bool:
         """Let a newer notification replace the delivery as the wait ends."""
-        controllers._deliveries["tesk-api"] = newer
+        controllers._deliveries[("tesk-api", "elixircloud/tesk-api")] = newer
         return True
 
     with patch.object(controllers, "_wait_for_image", replaced_after_wait):

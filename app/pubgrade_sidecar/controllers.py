@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 import hmac
 import logging
 import os
@@ -76,6 +76,8 @@ class _Delivery:
         detail: Explanation of a failure.
         generation: Generation of the Deployment that the patch resulted in.
         uid: Identifier of the Deployment that was patched.
+        targets: Containers that get the image, by index, with their new
+            images; without them, the first container gets `image`.
     """
 
     image: str
@@ -83,19 +85,24 @@ class _Delivery:
     detail: str | None = None
     generation: int = 0
     uid: str | None = None
+    targets: list[tuple[int, str]] = field(default_factory=list)
 
 
-# The last delivery per deployment, in memory: the sidecar has one replica. A
-# restart loses a delivery that still waits for its image; for a patched one,
-# the Deployment itself still tells the state of the rollout
-_deliveries: dict[str, _Delivery] = {}
+# The last delivery per deployment and image repository, in memory: the
+# sidecar has one replica. A restart loses a delivery that still waits for its
+# image; for a patched one, the Deployment itself still tells the state of the
+# rollout. A deployment with containers of several repositories has one
+# delivery per repository, so that they don't replace each other
+_deliveries: dict[tuple[str, str], _Delivery] = {}
 _lock = threading.Lock()
 # One lock per deployment, held from the last check that a delivery is current
 # to the end of its patch, so that a delivery that a newer one replaced can't
 # overwrite the newer one's image; status reports don't wait for it
 _patch_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
-# A sidecar serves few deployments, each with rare notifications
-_executor = ThreadPoolExecutor(max_workers=4)
+# Each delivery holds a worker while it waits for its image (about two
+# minutes at most); a notification for all deployments starts one delivery
+# per deployment, and further ones wait for a free worker
+_executor = ThreadPoolExecutor(max_workers=16)
 
 
 def _check_token() -> None:
@@ -200,16 +207,22 @@ def _read_deployment(deployment_name: str) -> tuple[Any, str]:
         raise NotFound from None
 
 
-def _images(deployment: Any) -> list[str]:
-    """List the images of the containers of a deployment.
+def _has_images(deployment: Any, delivery: _Delivery) -> bool:
+    """Tell whether a deployment has the images that a delivery requested.
 
     Args:
         deployment: Deployment as returned by the Kubernetes client.
+        delivery: Record of the delivery.
 
     Returns:
-        The images, in the order of the containers.
+        Whether each target container of the delivery has its new image.
     """
-    return [container.image for container in deployment.spec.template.spec.containers]
+    containers = deployment.spec.template.spec.containers
+    targets = delivery.targets or [(0, delivery.image)]
+    return all(
+        index < len(containers) and containers[index].image == image
+        for index, image in targets
+    )
 
 
 def _rollout_status(deployment: Any) -> str:
@@ -275,8 +288,10 @@ def getImage(deployment_name: str) -> Response:
         deployment_name: Name of the deployment.
 
     Returns:
-        JSON response with the image and the status. The last notification,
-        if any, is known until the sidecar restarts.
+        JSON response with the image and the status. The last notification
+        per image repository, if any, is known until the sidecar restarts: a
+        failed or waiting delivery of any of them counts over the
+        Deployment's own status, a failed one first.
 
     Raises:
         Unauthorized: If the token is missing or wrong.
@@ -285,11 +300,12 @@ def getImage(deployment_name: str) -> Response:
     """
     _check_token()
     with _lock:
-        delivery = _deliveries.get(deployment_name)
-        state = delivery.state if delivery else None
-        detail = delivery.detail if delivery else None
-        generation = delivery.generation if delivery else 0
-        uid = delivery.uid if delivery else None
+        # Copies, as deliveries change in the background
+        deliveries = [
+            replace(delivery)
+            for (name, _), delivery in _deliveries.items()
+            if name == deployment_name
+        ]
     deployment, image = _read_deployment(deployment_name)
     result = {
         "image": image,
@@ -298,20 +314,31 @@ def getImage(deployment_name: str) -> Response:
         "updated_replicas": deployment.status.updated_replicas or 0,
         "available_replicas": deployment.status.available_replicas or 0,
     }
-    if delivery is not None:
-        result["requested_image"] = delivery.image
-        # What the Deployment says counts once it has the requested image, or
-        # once it has moved past the patch, e.g., by a rollback, or was recreated
-        if state == "patched":
-            if (
-                deployment.metadata.uid == uid
-                and deployment.metadata.generation < generation
-            ):
-                result["status"] = "rolling_out"
-        elif delivery.image not in _images(deployment):
-            result["status"] = state
-            if detail:
-                result["detail"] = detail
+    if deliveries:
+        # The last notification, unless an earlier one (of another image
+        # repository) explains the status
+        reported = deliveries[-1]
+        rank = 0
+        for delivery in deliveries:
+            # What the Deployment says counts once it has the requested images,
+            # or once it has moved past the patch, e.g., by a rollback, or was
+            # recreated
+            if delivery.state == "patched":
+                if (
+                    deployment.metadata.uid == delivery.uid
+                    and deployment.metadata.generation < delivery.generation
+                    and rank < 1
+                ):
+                    reported, rank = delivery, 1
+                    result["status"] = "rolling_out"
+            elif not _has_images(deployment, delivery):
+                delivery_rank = 3 if delivery.state == "failed" else 2
+                if delivery_rank > rank:
+                    reported, rank = delivery, delivery_rank
+                    result["status"] = delivery.state
+        result["requested_image"] = reported.image
+        if rank > 1 and reported.detail:
+            result["detail"] = reported.detail
     return jsonify(result)
 
 
@@ -370,8 +397,8 @@ def updateDeployment(deployment_name: str) -> tuple[Response, int]:
         raise ImageRepositoryMismatch
     if not _is_on_docker_hub(image_repo):
         raise ImageRegistryUnsupported
-    image, patch = plan
-    if not _start_delivery(deployment_name, image, image_repo, image_tag, patch):
+    image, changes = plan
+    if not _start_delivery(deployment_name, image, image_repo, image_tag, changes):
         return jsonify(
             {"message": "Deployment already uses this image.", "image": image}
         ), 200
@@ -414,8 +441,8 @@ def updateDeployments() -> tuple[Response, int]:
     if not plans:
         raise NotFound
     started = False
-    for name, image, patch in plans:
-        started |= _start_delivery(name, image, image_repo, image_tag, patch)
+    for name, image, changes in plans:
+        started |= _start_delivery(name, image, image_repo, image_tag, changes)
     message = (
         "Updating images in progress..."
         if started
@@ -495,7 +522,7 @@ def _managed_deployments() -> list[Any]:
 
 def _plan_update(
     deployment: Any, image_repo: str, image_tag: str
-) -> tuple[str, list[dict[str, str]]] | None:
+) -> tuple[str, list[tuple[int, str, str]]] | None:
     """Plan the update of the containers that use an image repository.
 
     Each container keeps its spelling of the repository, so only the tag
@@ -509,11 +536,12 @@ def _plan_update(
 
     Returns:
         The image of the first container of the repository after the update,
-        and the JSON patch for the containers to change (empty if none needs
-        to); None if no container uses the repository.
+        and the containers to change (empty if none needs to), each with its
+        index, its current and its new image; None if no container uses the
+        repository.
     """
     image = None
-    patch = []
+    changes = []
     for index, container in enumerate(deployment.spec.template.spec.containers):
         old_repo, old_tag = _parse_image(container.image)
         if old_repo != image_repo:
@@ -524,18 +552,12 @@ def _plan_update(
             if old_tag is not None:
                 new_image = new_image.rsplit(":", 1)[0]
             new_image = f"{new_image}:{image_tag}"
-            patch.append(
-                {
-                    "op": "replace",
-                    "value": new_image,
-                    "path": f"/spec/template/spec/containers/{index}/image",
-                }
-            )
+            changes.append((index, container.image, new_image))
         if image is None:
             image = new_image
     if image is None:
         return None
-    return image, patch
+    return image, changes
 
 
 def _start_delivery(
@@ -543,44 +565,64 @@ def _start_delivery(
     image: str,
     image_repo: str,
     image_tag: str,
-    patch: list[dict[str, str]],
+    changes: list[tuple[int, str, str]],
 ) -> bool:
     """Start the delivery of an image to a deployment, if it needs one.
+
+    The JSON patch first tests that each container still has the image it was
+    planned for, so that a deployment changed during the wait for the image
+    fails the delivery instead of getting an image in another container.
 
     Args:
         deployment_name: Name of the deployment.
         image: Image of the first container of the repository after the update.
         image_repo: Canonical repository of the image.
         image_tag: Tag of the image.
-        patch: JSON patch for the deployment; empty if it uses the image
-            already, which ends an earlier delivery that still waits.
+        changes: Containers to change, each with its index, its current and
+            its new image; none if the deployment uses the image already,
+            which ends an earlier delivery that still waits.
 
     Returns:
         Whether a delivery started.
     """
-    if not patch:
+    key = (deployment_name, image_repo)
+    if not changes:
         with _lock:
-            _deliveries.pop(deployment_name, None)
+            _deliveries.pop(key, None)
         return False
-    delivery = _Delivery(image=image)
+    patch = []
+    for index, old_image, new_image in changes:
+        path = f"/spec/template/spec/containers/{index}/image"
+        patch += [
+            {"op": "test", "value": old_image, "path": path},
+            {"op": "replace", "value": new_image, "path": path},
+        ]
+    delivery = _Delivery(
+        image=image,
+        targets=[(index, new_image) for index, _, new_image in changes],
+    )
     with _lock:
-        _deliveries[deployment_name] = delivery
+        # Last in the order of the records, as the newest notification
+        _deliveries.pop(key, None)
+        _deliveries[key] = delivery
     _executor.submit(_deliver, delivery, image_repo, image_tag, deployment_name, patch)
     return True
 
 
-def _is_current(delivery: _Delivery, deployment_name: str) -> bool:
+def _is_current(delivery: _Delivery, deployment_name: str, image_repo: str) -> bool:
     """Tell whether no newer notification has replaced a delivery.
 
     Args:
         delivery: Record of the delivery.
         deployment_name: Name of the deployment.
+        image_repo: Canonical repository of the image.
 
     Returns:
-        Whether the delivery is the last one of the deployment.
+        Whether the delivery is the last one of the deployment for the image
+        repository.
     """
     with _lock:
-        return _deliveries.get(deployment_name) is delivery
+        return _deliveries.get((deployment_name, image_repo)) is delivery
 
 
 def _deliver(
@@ -611,7 +653,7 @@ def _deliver(
         with _lock:
             patch_lock = _patch_locks[deployment_name]
         with patch_lock:
-            if not _is_current(delivery, deployment_name):
+            if not _is_current(delivery, deployment_name, image_repo):
                 logger.info("Skipping a superseded delivery.")
                 return
             patched: Any = apiV1.patch_namespaced_deployment(
@@ -665,10 +707,10 @@ def _wait_for_image(
         DockerImageUnavailable: If the image is still missing after all tries.
     """
     for attempt in range(MAX_RETRY + 1):
-        if not _is_current(delivery, deployment_name):
+        if not _is_current(delivery, deployment_name, image_repo):
             return False
         if check_docker_image_availability(image_repo, image_tag):
-            return _is_current(delivery, deployment_name)
+            return _is_current(delivery, deployment_name, image_repo)
         if attempt < MAX_RETRY:
             time.sleep(RETRY_INTERVAL)
     raise DockerImageUnavailable

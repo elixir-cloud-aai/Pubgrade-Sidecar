@@ -259,10 +259,15 @@ def test_update_deployment(mock_executor: MagicMock, mock_check: MagicMock) -> N
         "pubgrade",
         [
             {
+                "op": "test",
+                "value": "akash7778/pubgrade:latest",
+                "path": "/spec/template/spec/containers/0/image",
+            },
+            {
                 "op": "replace",
                 "value": image,
                 "path": "/spec/template/spec/containers/0/image",
-            }
+            },
         ],
     ]
     # The image is checked in the background only

@@ -70,8 +70,8 @@ curl --location --request PUT 'https://{sidecar-host}/deployment/{deployment-nam
 ```
 
 Every container of the deployment whose image repository equals `image_name`
-gets the new tag (before version 3.1.0 of the API: only the first container,
-which had to use the repository); if none does, the call gets a 409.
+gets the new tag; if none does, the call gets a 409 (see
+[Upgrading to version 3.1.0 of the API](deployment.md#upgrading-to-version-310-of-the-api)).
 
 A notification of a new image returns at once, with status 202; the rollout
 runs in the background. If the deployments already use the image, it returns
@@ -136,6 +136,13 @@ an explanation in `detail`). A failure counts until the deployment has the
 requested image, and a change of the deployment after a rollout, e.g., a
 rollback, counts over the last notification. A newer notification replaces
 one that still waits for its image.
+A deployment with containers of several image repositories keeps the last
+notification per repository, so that they don't replace each other. A failed
+delivery of any of them, then a waiting one, counts over the deployment's own
+status, and `requested_image` names its image; otherwise `requested_image` is
+the image of the last notification. A delivery fails, without changing the
+deployment, if a container to update no longer has the image it had when the
+notification arrived, e.g., after an upgrade by hand.
 
 `requested_image` and `detail` are kept in memory: a restart loses a notification
 that is still waiting for its image, without a report. Afterwards, `status` only
