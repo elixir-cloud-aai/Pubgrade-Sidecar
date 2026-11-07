@@ -317,13 +317,14 @@ def push(registry: str, repository: str, tag: str) -> None:
     base = f"http://{registry}/v2/{repository}"
     config = b"{}"
     digest = "sha256:" + hashlib.sha256(config).hexdigest()
-    upload = requests.post(f"{base}/blobs/uploads/", timeout=10)
+    # The test registry (`registry:2` in CI) serves HTTP only, locally
+    upload = requests.post(f"{base}/blobs/uploads/", timeout=10)  # nosemgrep
     upload.raise_for_status()
     location = upload.headers["Location"]
     if location.startswith("/"):
         location = f"http://{registry}{location}"
     separator = "&" if "?" in location else "?"
-    requests.put(
+    requests.put(  # nosemgrep
         f"{location}{separator}digest={digest}",
         data=config,
         headers={"Content-Type": "application/octet-stream"},
@@ -339,7 +340,7 @@ def push(registry: str, repository: str, tag: str) -> None:
         },
         "layers": [],
     }
-    requests.put(
+    requests.put(  # nosemgrep
         f"{base}/manifests/{tag}",
         data=json.dumps(manifest),
         headers={"Content-Type": "application/vnd.oci.image.manifest.v1+json"},

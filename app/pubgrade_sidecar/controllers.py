@@ -833,7 +833,7 @@ def _credentials(host: str) -> tuple[str, str] | None:
             return entry["username"], entry["password"]
         except (ValueError, KeyError, AttributeError, TypeError):
             # The key is a registry host; the entry's content isn't logged
-            logger.warning(
+            logger.warning(  # nosemgrep
                 "Registry credentials for %s could not be read: they need "
                 "`auth`, or `username` and `password`.",
                 key,
