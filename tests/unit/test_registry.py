@@ -324,8 +324,8 @@ def push(registry: str, repository: str, tag: str) -> None:
     if location.startswith("/"):
         location = f"http://{registry}{location}"
     separator = "&" if "?" in location else "?"
-    requests.put(  # nosemgrep
-        f"{location}{separator}digest={digest}",
+    requests.put(
+        f"{location}{separator}digest={digest}",  # nosemgrep
         data=config,
         headers={"Content-Type": "application/octet-stream"},
         timeout=10,
@@ -340,8 +340,8 @@ def push(registry: str, repository: str, tag: str) -> None:
         },
         "layers": [],
     }
-    requests.put(  # nosemgrep
-        f"{base}/manifests/{tag}",
+    requests.put(
+        f"{base}/manifests/{tag}",  # nosemgrep
         data=json.dumps(manifest),
         headers={"Content-Type": "application/vnd.oci.image.manifest.v1+json"},
         timeout=10,
