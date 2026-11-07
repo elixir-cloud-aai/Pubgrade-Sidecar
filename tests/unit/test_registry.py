@@ -2,10 +2,12 @@
 
 import base64
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
-from typing import Any
+import threading
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 import uuid
 
@@ -37,6 +39,7 @@ def response(
     mock.status_code = status
     mock.headers = headers or {}
     mock.iter_content.return_value = [json.dumps(body).encode()]
+    mock.history = []
     return mock
 
 
@@ -446,3 +449,58 @@ def test_next_docker_hub_key_after_unusable_entry(
     assert mock_get.call_args.kwargs["auth"] == ("user", "pw")
     assert "docker.io" in caplog.text
     assert "secret-value" not in caplog.text
+
+
+class _Recorder(BaseHTTPRequestHandler):
+    """Registry that records requests, and redirects or challenges them."""
+
+    seen: ClassVar[list[tuple[str, str | None]]] = []
+    redirect_to = ""
+
+    def do_HEAD(self) -> None:
+        """Redirect, or ask for a token from a foreign token service."""
+        host = self.headers["Host"]
+        self.seen.append((host, self.headers.get("Authorization")))
+        if self.redirect_to and not host.startswith("localhost"):
+            self.send_response(307)
+            self.send_header("Location", f"{self.redirect_to}{self.path}")
+        else:
+            self.send_response(401)
+            self.send_header(
+                "WWW-Authenticate", 'Bearer realm="https://evil.example.org/token"'
+            )
+        self.end_headers()
+
+    def log_message(self, *args: Any) -> None:
+        """Keep the test output clean."""
+
+
+@patch(GET)
+def test_challenge_after_redirect_unanswered(
+    mock_get: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that a host the registry redirects to gets no credentials."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Recorder)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        registry = f"127.0.0.1:{port}"
+        _Recorder.seen = []
+        _Recorder.redirect_to = f"http://localhost:{port}"
+        monkeypatch.setenv("INSECURE_REGISTRIES", registry)
+        auth_file(
+            tmp_path,
+            monkeypatch,
+            {"auths": {registry: {"username": "user", "password": "secret"}}},
+        )
+        assert not check_image_availability(f"{registry}/org/app", "1")
+    finally:
+        server.shutdown()
+        server.server_close()
+    mock_get.assert_not_called()
+    assert [host.split(":")[0] for host, _ in _Recorder.seen] == [
+        "127.0.0.1",
+        "localhost",
+    ]
+    assert all(authorization is None for _, authorization in _Recorder.seen)

@@ -41,9 +41,10 @@ docker stop registry
 ```
 
 It checks anonymous access only; token and Basic authentication are tested
-with mocked responses. After
-changing dependencies in `pyproject.toml`, update the lock with `uv lock`; CI
-fails if it doesn't match.
+with mocked responses.
+
+After changing dependencies in `pyproject.toml`, update the lock with `uv lock`;
+CI fails if it doesn't match.
 
 The integration test runs the sidecar on a real, throw-away cluster: it builds
 the image, starts k3s in a Docker container, installs the chart into two

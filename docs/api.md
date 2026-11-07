@@ -80,12 +80,12 @@ nothing happens. Only the tag can change, and `docker.io/<repository>` and
 `<repository>` count as the same repository. The sidecar waits for the image in
 its registry, about two minutes (longer if the registry answers slowly): Docker
 Hub for repositories without a registry host, otherwise the registry named in
-the repository, e.g., `harbor.example.org/project/tesk-api`. Registries that
-serve the OCI distribution API work, for example Harbor, GitLab, Quay and GHCR
-(CI tests `registry:2`); for private images, the sidecar needs credentials (see
-[Deployment](deployment.md#registries)). Use a new tag for every release: a tag
-that the deployment already uses, like one pushed again, doesn't lead to a
-rollout.
+the repository, e.g., `harbor.example.org/project/tesk-api`. Any registry that
+implements the OCI distribution API should work, e.g., Harbor, GitLab, Quay or
+GHCR (CI tests the sidecar with `registry:2`); for private images, the sidecar
+needs credentials (see [Deployment](deployment.md#registries)). Use a new tag
+for every release: a tag that the deployment already uses, like one pushed
+again, doesn't lead to a rollout.
 
 ```text
 Status  Meaning

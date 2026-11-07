@@ -12,6 +12,7 @@ import re
 import threading
 import time
 from typing import Any, NoReturn, cast
+from urllib.parse import urlsplit
 
 from flask import Response, jsonify, request
 from kubernetes import client, config
@@ -906,7 +907,8 @@ def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
     """Ask a registry for a manifest, and authenticate if it asks for it.
 
     Redirects are followed; `requests` drops the authorization on redirects
-    to other hosts.
+    to other hosts. Only challenges of the registry itself are answered, so
+    that a host it redirects to can't ask for its credentials.
 
     Args:
         url: URL of the manifest.
@@ -927,6 +929,8 @@ def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
         url, headers=headers, timeout=REQUEST_TIMEOUT, allow_redirects=True
     )
     if response.status_code != 401:
+        return response
+    if response.history and urlsplit(response.url).netloc != host:
         return response
     kind, _, parameters = response.headers.get("WWW-Authenticate", "").partition(" ")
     fields = dict(CHALLENGE_PARAMETER.findall(parameters))

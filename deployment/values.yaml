@@ -37,6 +37,7 @@ accessToken:
 #     --docker-password=<secret>
 registryCredentials:
   existingSecret: ""
+  # Key of the credentials in the Secret; unused without `existingSecret`
   key: .dockerconfigjson
 
 # Optional: registries (`host` or `host:port`) that are reached over HTTP
