@@ -64,6 +64,30 @@ List only what the sidecar has to update, and add an admission policy in your
 cluster if you need a stricter limit.
 All values are described in `deployment/values.yaml`.
 
+### Registries
+
+Before a rollout, the sidecar checks that the image is in its registry, with
+the OCI distribution API: Docker Hub for repositories without a registry host,
+otherwise the registry named in the repository (e.g., a Harbor project,
+`harbor.example.org/project/tesk-api`). It asks anonymously over HTTPS, which
+suffices for public images. For private images, create a Secret with
+credentials that may pull them (e.g., a Harbor robot account), and name it in
+`registryCredentials.existingSecret`:
+
+```bash
+kubectl -n production create secret docker-registry registry-credentials \
+  --docker-server=harbor.example.org \
+  --docker-username='robot$sidecar' --docker-password=<secret>
+```
+
+The chart mounts its key `.dockerconfigjson` (set another one with
+`registryCredentials.key`, e.g., for a Docker `config.json`) and passes the
+path in `REGISTRY_AUTH_FILE`. The sidecar only reads it to check images; the
+cluster pulls them with the Deployments' own `imagePullSecrets`. Registries
+that serve only HTTP, e.g., one in the cluster, go in `insecureRegistries`
+(`host` or `host:port`; environment variable `INSECURE_REGISTRIES`,
+comma-separated); credentials for them are sent unencrypted.
+
 To change the token, update the Secret and restart the sidecar, which reads the
 token at start:
 
@@ -94,6 +118,12 @@ an image repository (see [API](api.md)), and the chart value
 deployment whose image repository equals `image_name`. Before, it updated
 only the first container, and answered 409 if that one used another
 repository; now a 409 means that no container uses it.
+
+Images are no longer limited to Docker Hub: the sidecar checks for them in the
+registry named in the repository, with optional credentials and the chart
+values `registryCredentials` and `insecureRegistries` (see
+[Registries](#registries)). Repositories on other registries, which got a 409
+before, are now rolled out.
 
 ## Upgrading to version 3.0.0 of the API
 
