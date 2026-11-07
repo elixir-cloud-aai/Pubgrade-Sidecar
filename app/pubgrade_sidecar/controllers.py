@@ -20,9 +20,9 @@ import requests
 
 from pubgrade_sidecar.errors.exceptions import (
     BadRequest,
-    DockerImageUnavailable,
     Forbidden,
     ImageRepositoryMismatch,
+    ImageUnavailable,
     InternalServerError,
     NotFound,
     Unauthorized,
@@ -81,6 +81,8 @@ MANIFEST_TYPES = ", ".join(
         "application/vnd.docker.distribution.manifest.v2+json",
     ]
 )
+# Largest response of a token service that is read, in bytes
+MAX_TOKEN_RESPONSE = 256 * 1024
 # Parameters of an authentication challenge (`WWW-Authenticate`)
 CHALLENGE_PARAMETER = re.compile(r'(\w+)="([^"]*)"')
 # The format of Docker image tags
@@ -723,7 +725,7 @@ def _deliver(
                 delivery.state = "patched"
                 delivery.generation = patched.metadata.generation
                 delivery.uid = patched.metadata.uid
-    except DockerImageUnavailable:
+    except ImageUnavailable:
         logger.warning("Image of a notification isn't available.")
         _fail(delivery, "Image not available, or its registry not reachable.")
     except Exception:
@@ -761,7 +763,7 @@ def _wait_for_image(
         True once the image is available, False if the delivery was replaced.
 
     Raises:
-        DockerImageUnavailable: If the image is still missing after all tries.
+        ImageUnavailable: If the image is still missing after all tries.
     """
     for attempt in range(MAX_RETRY + 1):
         if not _is_current(delivery, deployment_name, image_repo):
@@ -770,7 +772,7 @@ def _wait_for_image(
             return _is_current(delivery, deployment_name, image_repo)
         if attempt < MAX_RETRY:
             time.sleep(RETRY_INTERVAL)
-    raise DockerImageUnavailable
+    raise ImageUnavailable
 
 
 def _registry(image_repo: str) -> tuple[str, str]:
@@ -795,7 +797,8 @@ def _credentials(host: str) -> tuple[str, str] | None:
     They come from a Docker configuration file (`auths`, with `auth` or
     `username` and `password` per registry) at the path in
     `REGISTRY_AUTH_FILE`, e.g., a mounted Secret of the type
-    `kubernetes.io/dockerconfigjson`.
+    `kubernetes.io/dockerconfigjson`. Credential helpers and identity tokens
+    aren't supported. For Docker Hub, the first usable of its keys counts.
 
     Args:
         host: Host of the registry.
@@ -806,14 +809,19 @@ def _credentials(host: str) -> tuple[str, str] | None:
     path = os.getenv("REGISTRY_AUTH_FILE")
     if not path:
         return None
+    keys = DOCKER_HUB_KEYS if host == DOCKER_HUB_REGISTRY else (host,)
     try:
         with open(path, encoding="utf-8") as stream:
             auths = json.load(stream).get("auths", {})
-        keys = DOCKER_HUB_KEYS if host == DOCKER_HUB_REGISTRY else (host,)
-        for key in keys:
-            entry = auths.get(key) or auths.get(f"https://{key}")
-            if not entry:
-                continue
+        entries = [(key, auths.get(key) or auths.get(f"https://{key}")) for key in keys]
+    except (OSError, ValueError, AttributeError):
+        # Without details, which could quote the file
+        logger.warning("Registry credentials could not be read.")
+        return None
+    for key, entry in entries:
+        if not entry:
+            continue
+        try:
             if entry.get("auth"):
                 user, _, password = (
                     base64.b64decode(entry["auth"], validate=True)
@@ -822,21 +830,134 @@ def _credentials(host: str) -> tuple[str, str] | None:
                 )
                 return user, password
             return entry["username"], entry["password"]
-    except (OSError, ValueError, KeyError, AttributeError, TypeError):
-        # Without details, which could quote the file
-        logger.warning("Registry credentials could not be read.")
+        except (ValueError, KeyError, AttributeError, TypeError):
+            # The key is a registry host; the entry's content isn't logged
+            logger.warning(
+                "Registry credentials for %s could not be read: they need "
+                "`auth`, or `username` and `password`.",
+                key,
+            )
     return None
+
+
+def _insecure_registries() -> list[str]:
+    """List the registries that are reached over HTTP.
+
+    Returns:
+        Hosts (with port, if any) in `INSECURE_REGISTRIES` (comma-separated).
+    """
+    return [
+        entry.strip()
+        for entry in os.getenv("INSECURE_REGISTRIES", "").split(",")
+        if entry.strip()
+    ]
+
+
+def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
+    """Request a token from the token service that a registry names.
+
+    Credentials (see `_credentials`) are sent only to a token service over
+    HTTPS, as with Docker's own client, or to an insecure registry itself.
+    The response is read up to `MAX_TOKEN_RESPONSE` bytes.
+
+    Args:
+        fields: Parameters of the registry's challenge, with `realm`, the
+            URL of the token service.
+        host: Host of the registry.
+        scheme: Scheme of the registry's URL.
+
+    Returns:
+        The token, or None if there is none.
+
+    Raises:
+        requests.RequestException: If the token service can't be reached.
+        ValueError: If the response isn't JSON.
+        AttributeError: If the response isn't a JSON object.
+    """
+    realm = fields["realm"]
+    if not realm.startswith(("https://", "http://")):
+        return None
+    trusted = realm.startswith("https://") or (
+        scheme == "http" and realm.startswith(f"http://{host}/")
+    )
+    token_response = requests.get(
+        realm,
+        params={key: fields[key] for key in ("service", "scope") if key in fields},
+        auth=_credentials(host) if trusted else None,
+        timeout=REQUEST_TIMEOUT,
+        stream=True,
+    )
+    try:
+        if token_response.status_code != 200:
+            return None
+        content = b""
+        for chunk in token_response.iter_content(chunk_size=65536):
+            content += chunk
+            if len(content) > MAX_TOKEN_RESPONSE:
+                return None
+    finally:
+        token_response.close()
+    body = json.loads(content)
+    token = body.get("token") or body.get("access_token")
+    return token if isinstance(token, str) and token else None
+
+
+def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
+    """Ask a registry for a manifest, and authenticate if it asks for it.
+
+    Redirects are followed; `requests` drops the authorization on redirects
+    to other hosts.
+
+    Args:
+        url: URL of the manifest.
+        host: Host of the registry.
+        scheme: Scheme of the URL.
+
+    Returns:
+        The registry's last response.
+
+    Raises:
+        requests.RequestException: If the registry or its token service
+            can't be reached.
+        ValueError: If the token service's response isn't JSON.
+        AttributeError: If the token service's response isn't a JSON object.
+    """
+    headers = {"Accept": MANIFEST_TYPES}
+    response = requests.head(
+        url, headers=headers, timeout=REQUEST_TIMEOUT, allow_redirects=True
+    )
+    if response.status_code != 401:
+        return response
+    kind, _, parameters = response.headers.get("WWW-Authenticate", "").partition(" ")
+    fields = dict(CHALLENGE_PARAMETER.findall(parameters))
+    if kind.lower() == "bearer" and "realm" in fields:
+        token = _bearer_token(fields, host, scheme)
+        if token is None:
+            return response
+        return requests.head(
+            url,
+            headers={**headers, "Authorization": f"Bearer {token}"},
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=True,
+        )
+    credentials = _credentials(host) if kind.lower() == "basic" else None
+    if credentials is None:
+        return response
+    return requests.head(
+        url,
+        headers=headers,
+        auth=credentials,
+        timeout=REQUEST_TIMEOUT,
+        allow_redirects=True,
+    )
 
 
 def check_image_availability(image_repo: str, tag: str = "latest") -> bool:
     """Check whether the registry of an image has it.
 
     Asks the registry for the image's manifest (OCI distribution API), over
-    HTTPS, or HTTP for the hosts in `INSECURE_REGISTRIES` (comma-separated).
-    If the registry asks for a token, it is requested from the registry's
-    token service, anonymously or with the registry's credentials (see
-    `_credentials`); credentials are only sent over HTTPS, or to insecure
-    registries themselves.
+    HTTPS, or HTTP for the hosts in `INSECURE_REGISTRIES`, with a token or
+    Basic authentication if the registry asks for it (see `_head_manifest`).
 
     Args:
         image_repo: Canonical repository of the image, see `_parse_image`.
@@ -847,52 +968,10 @@ def check_image_availability(image_repo: str, tag: str = "latest") -> bool:
         count as not available.
     """
     host, name = _registry(image_repo)
-    insecure = [
-        entry.strip()
-        for entry in os.getenv("INSECURE_REGISTRIES", "").split(",")
-        if entry.strip()
-    ]
-    scheme = "http" if host in insecure else "https"
+    scheme = "http" if host in _insecure_registries() else "https"
     url = f"{scheme}://{host}/v2/{name}/manifests/{tag}"
-    headers = {"Accept": MANIFEST_TYPES}
-    credentials = _credentials(host)
     try:
-        response = requests.head(url, headers=headers, timeout=REQUEST_TIMEOUT)
-        if response.status_code == 401:
-            kind, _, parameters = response.headers.get(
-                "WWW-Authenticate", ""
-            ).partition(" ")
-            fields = dict(CHALLENGE_PARAMETER.findall(parameters))
-            if kind.lower() == "bearer" and "realm" in fields:
-                realm = fields["realm"]
-                trusted = realm.startswith("https://") or (
-                    scheme == "http" and realm.startswith(f"http://{host}/")
-                )
-                token_response = requests.get(
-                    realm,
-                    params={
-                        key: fields[key]
-                        for key in ("service", "scope")
-                        if key in fields
-                    },
-                    auth=credentials if trusted else None,
-                    timeout=REQUEST_TIMEOUT,
-                )
-                if token_response.status_code != 200:
-                    return False
-                body = token_response.json()
-                token = body.get("token") or body.get("access_token")
-                if not token:
-                    return False
-                response = requests.head(
-                    url,
-                    headers={**headers, "Authorization": f"Bearer {token}"},
-                    timeout=REQUEST_TIMEOUT,
-                )
-            elif kind.lower() == "basic" and credentials:
-                response = requests.head(
-                    url, headers=headers, auth=credentials, timeout=REQUEST_TIMEOUT
-                )
+        response = _head_manifest(url, host, scheme)
     except (requests.RequestException, ValueError, AttributeError):
         return False
     return response.status_code == 200

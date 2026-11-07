@@ -74,17 +74,18 @@ Every container of the deployment whose image repository equals `image_name`
 gets the new tag; if none does, the call gets a 409 (see
 [Upgrading to version 3.1.0 of the API](deployment.md#upgrading-to-version-310-of-the-api)).
 
-A notification of a new image returns at once, with status 202; the rollout
-runs in the background. If the deployments already use the image, it returns
-200 and nothing happens. Only the tag can change, and `docker.io/<repository>` and
-`<repository>` count as the same repository. The sidecar waits for the image
-in its registry, about two minutes at most: Docker Hub for repositories without
-a registry host, otherwise the registry named in the repository, e.g.,
-`harbor.example.org/project/tesk-api`. Any registry that serves the OCI
-distribution API works (Docker Hub, Harbor, GitLab, Quay, GHCR, `registry:2`
-and others); for private images, the sidecar needs credentials (see
-[Deployment](deployment.md#registries)). Use a new tag for every release: a tag that the deployment already
-uses, like one pushed again, doesn't lead to a rollout.
+A notification of a new image returns at once, with status 202; the rollout runs
+in the background. If the deployments already use the image, it returns 200 and
+nothing happens. Only the tag can change, and `docker.io/<repository>` and
+`<repository>` count as the same repository. The sidecar waits for the image in
+its registry, about two minutes (longer if the registry answers slowly): Docker
+Hub for repositories without a registry host, otherwise the registry named in
+the repository, e.g., `harbor.example.org/project/tesk-api`. Registries that
+serve the OCI distribution API work, for example Harbor, GitLab, Quay and GHCR
+(CI tests `registry:2`); for private images, the sidecar needs credentials (see
+[Deployment](deployment.md#registries)). Use a new tag for every release: a tag
+that the deployment already uses, like one pushed again, doesn't lead to a
+rollout.
 
 ```text
 Status  Meaning

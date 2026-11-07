@@ -17,7 +17,7 @@ from werkzeug.exceptions import (
 )
 
 
-class DockerImageUnavailable(NotFound):
+class ImageUnavailable(NotFound):
     """Raised when the image of a notification isn't in its registry.
 
     Only raised in the background, while a delivery waits for the image, so

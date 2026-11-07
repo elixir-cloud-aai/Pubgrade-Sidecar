@@ -36,7 +36,7 @@ def response(
     mock = MagicMock()
     mock.status_code = status
     mock.headers = headers or {}
-    mock.json.return_value = body
+    mock.iter_content.return_value = [json.dumps(body).encode()]
     return mock
 
 
@@ -182,7 +182,7 @@ def test_credentials_of_other_registry_unused(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Test that credentials go only to their own registry."""
+    """Test that credentials of other registries aren't used."""
     auth_file(
         tmp_path,
         monkeypatch,
@@ -289,7 +289,7 @@ def test_unreadable_credentials(
     mock_head.side_effect = [bearer(), response(200)]
     assert check_image_availability("org/app", "1")
     assert mock_get.call_args.kwargs["auth"] is None
-    assert "Registry credentials could not be read." in caplog.messages
+    assert any("could not be read" in message for message in caplog.messages)
     assert "!!" not in caplog.text
 
 
@@ -356,3 +356,93 @@ def test_generic_oci_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     push(registry, repository, "1.0")
     assert controllers.check_image_availability(f"{registry}/{repository}", "1.0")
     assert not controllers.check_image_availability(f"{registry}/{repository}", "2.0")
+
+
+@pytest.mark.parametrize("status", [401, 404])
+@patch(GET, return_value=response(200, body={"token": "abc"}))
+@patch(HEAD)
+def test_missing_with_token(
+    mock_head: MagicMock, mock_get: MagicMock, status: int
+) -> None:
+    """Test that a refusal with a token means not available."""
+    mock_head.side_effect = [bearer(), response(status)]
+    assert not check_image_availability("org/app", "1")
+    assert mock_head.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "challenge",
+    [
+        'Bearer service="registry"',
+        'Negotiate realm="registry"',
+        'Bearer realm="file:///etc/passwd"',
+        "",
+    ],
+)
+@patch(GET)
+@patch(HEAD)
+def test_unusable_challenge(
+    mock_head: MagicMock, mock_get: MagicMock, challenge: str
+) -> None:
+    """Test that challenges without a usable token service fail at once."""
+    mock_head.return_value = response(401, {"WWW-Authenticate": challenge})
+    assert not check_image_availability("org/app", "1")
+    assert mock_head.call_count == 1
+    mock_get.assert_not_called()
+
+
+@patch(HEAD)
+def test_token_response_not_json(mock_head: MagicMock) -> None:
+    """Test that a token response that isn't JSON means not available."""
+    mock_head.side_effect = [bearer(), response(200)]
+    token_response = response(200)
+    token_response.iter_content.return_value = [b"<html>"]
+    with patch(GET, return_value=token_response):
+        assert not check_image_availability("org/app", "1")
+
+
+@patch(HEAD)
+def test_token_response_too_large(mock_head: MagicMock) -> None:
+    """Test that a token response isn't read beyond its limit."""
+    mock_head.side_effect = [bearer(), response(200)]
+    token_response = response(200)
+    chunk = b" " * 65536
+    token_response.iter_content.return_value = iter([chunk] * 100)
+    with patch(GET, return_value=token_response):
+        assert not check_image_availability("org/app", "1")
+    assert mock_head.call_count == 1
+    token_response.close.assert_called_once()
+
+
+@patch(HEAD, return_value=response(200))
+def test_redirects_followed(mock_head: MagicMock) -> None:
+    """Test that the registry may redirect the request for the manifest."""
+    assert check_image_availability("org/app", "1")
+    assert mock_head.call_args.kwargs["allow_redirects"] is True
+
+
+@patch(GET, return_value=response(200, body={"token": "abc"}))
+@patch(HEAD)
+def test_next_docker_hub_key_after_unusable_entry(
+    mock_head: MagicMock,
+    mock_get: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test that an unusable entry for Docker Hub doesn't hide a later one."""
+    auth_file(
+        tmp_path,
+        monkeypatch,
+        {
+            "auths": {
+                "docker.io": {"identitytoken": "secret-value"},
+                "registry-1.docker.io": {"username": "user", "password": "pw"},
+            }
+        },
+    )
+    mock_head.side_effect = [bearer(), response(200)]
+    assert check_image_availability("org/app", "1")
+    assert mock_get.call_args.kwargs["auth"] == ("user", "pw")
+    assert "docker.io" in caplog.text
+    assert "secret-value" not in caplog.text

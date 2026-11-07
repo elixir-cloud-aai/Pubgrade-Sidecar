@@ -64,7 +64,14 @@ List only what the sidecar has to update, and add an admission policy in your
 cluster if you need a stricter limit.
 All values are described in `deployment/values.yaml`.
 
-### Registries
+To change the token, update the Secret and restart the sidecar, which reads the
+token at start:
+
+```bash
+kubectl -n production rollout restart deployment/pubgrade-sidecar
+```
+
+## Registries
 
 Before a rollout, the sidecar checks that the image is in its registry, with
 the OCI distribution API: Docker Hub for repositories without a registry host,
@@ -82,18 +89,16 @@ kubectl -n production create secret docker-registry registry-credentials \
 
 The chart mounts its key `.dockerconfigjson` (set another one with
 `registryCredentials.key`, e.g., for a Docker `config.json`) and passes the
-path in `REGISTRY_AUTH_FILE`. The sidecar only reads it to check images; the
-cluster pulls them with the Deployments' own `imagePullSecrets`. Registries
-that serve only HTTP, e.g., one in the cluster, go in `insecureRegistries`
-(`host` or `host:port`; environment variable `INSECURE_REGISTRIES`,
-comma-separated); credentials for them are sent unencrypted.
-
-To change the token, update the Secret and restart the sidecar, which reads the
-token at start:
-
-```bash
-kubectl -n production rollout restart deployment/pubgrade-sidecar
-```
+path in `REGISTRY_AUTH_FILE`. Only its `auths` entries are read, with `auth` or
+`username` and `password` (not credential helpers or identity tokens). If the
+registry names a token service, as Docker Hub and Harbor do, the credentials go
+to that service, as with Docker's own client, but only over HTTPS (or to an
+insecure registry itself). The sidecar only reads them to check images; the
+cluster pulls the images with the Deployments' own `imagePullSecrets`.
+Registries that serve only HTTP, e.g., one in the cluster, go in
+`insecureRegistries` (`host` or `host:port`; environment variable
+`INSECURE_REGISTRIES`, comma-separated); credentials for them are sent
+unencrypted.
 
 ## Changed image tags (November 2026)
 
