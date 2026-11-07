@@ -48,7 +48,8 @@ default security constraints apply.
 
 `PUT /deployment` updates all `targetDeployments` that use the notified image
 repository (see [API](api.md)). To limit it to some of them, set
-`deploymentLabel` to a label they have, `key=value`, or `key` for any value;
+`deploymentLabel` to a label they have, `key=value`, or `key` for any value (a
+value without a key, e.g., `=api`, matches no deployment);
 `PUT /deployment/{name}` isn't limited by it. Outside the chart, the sidecar
 takes these settings from the environment variables `TARGET_DEPLOYMENTS`
 (comma-separated names; without it, all deployments in the namespace, which

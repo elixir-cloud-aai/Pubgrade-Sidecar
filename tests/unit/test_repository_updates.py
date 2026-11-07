@@ -541,36 +541,121 @@ def test_changed_container_fails_the_delivery(
     assert report["detail"] == "Deployment could not be updated."
 
 
+@pytest.mark.parametrize(
+    "now,expected",
+    [
+        # Patched by an older delivery meanwhile
+        (
+            [f"{REPOSITORY}:1.1.0", f"{REPOSITORY}:1.0.0"],
+            [
+                *replace(0, f"{REPOSITORY}:1.1.0", f"{REPOSITORY}:1.2.0"),
+                *replace(1, f"{REPOSITORY}:1.0.0", f"{REPOSITORY}:1.2.0"),
+            ],
+        ),
+        # Reordered, with a container added
+        (
+            ["other/proxy:1.0", f"{REPOSITORY}:1.0.0", f"docker.io/{REPOSITORY}:1.0.0"],
+            [
+                *replace(1, f"{REPOSITORY}:1.0.0", f"{REPOSITORY}:1.2.0"),
+                *replace(
+                    2, f"docker.io/{REPOSITORY}:1.0.0", f"docker.io/{REPOSITORY}:1.2.0"
+                ),
+            ],
+        ),
+    ],
+)
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS["tesk-worker"])
 @patch(CHECK, return_value=True)
 @patch(READ)
-def test_tests_follow_the_current_tag(
+def test_patch_planned_from_current_deployment(
     mock_read: MagicMock,
     mock_check: MagicMock,
     mock_patch: MagicMock,
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,
+    now: list[str],
+    expected: list[dict[str, str]],
 ) -> None:
-    """Test that a patch since planning changes only the tested tag.
-
-    E.g., an older delivery of the same repository that patched the deployment
-    while the newer notification was planned. A container that now has another
-    repository keeps the planned test, so that the patch fails.
-    """
+    """Test that the patch follows changes of the deployment during the wait."""
     executor = DeferredExecutor()
     monkeypatch.setattr(controllers, "_executor", executor)
     mock_read.return_value = deployment(
         "tesk-worker", [f"{REPOSITORY}:1.0.0", f"{REPOSITORY}:1.0.0"]
     )
     assert notify_one(app, "tesk-worker")[1] == 202
-    mock_read.return_value = deployment(
-        "tesk-worker", [f"{REPOSITORY}:1.1.0", "other/proxy:1.0"]
-    )
+    mock_read.return_value = deployment("tesk-worker", now)
     executor.run()
-    body = mock_patch.call_args.kwargs["body"]
-    assert [operation["value"] for operation in body] == [
-        f"{REPOSITORY}:1.1.0",
-        f"{REPOSITORY}:1.2.0",
-        f"{REPOSITORY}:1.0.0",
-        f"{REPOSITORY}:1.2.0",
+    assert mock_patch.call_args.kwargs["body"] == expected
+    delivery = controllers._deliveries[("tesk-worker", REPOSITORY)]
+    assert delivery.state == "patched"
+    assert delivery.targets == [
+        (int(operation["path"].split("/")[-2]), operation["value"])
+        for operation in expected
+        if operation["op"] == "replace"
     ]
+
+
+@pytest.mark.parametrize(
+    "now,state",
+    [
+        # Updated by hand meanwhile
+        ([f"{REPOSITORY}:1.2.0"], "patched"),
+        # No longer uses the repository
+        (["other/proxy:1.0"], "failed"),
+    ],
+)
+@patch(PATCH)
+@patch(CHECK, return_value=True)
+@patch(READ)
+def test_nothing_to_patch_after_the_wait(
+    mock_read: MagicMock,
+    mock_check: MagicMock,
+    mock_patch: MagicMock,
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    now: list[str],
+    state: str,
+) -> None:
+    """Test that a deployment changed during the wait isn't patched."""
+    executor = DeferredExecutor()
+    monkeypatch.setattr(controllers, "_executor", executor)
+    mock_read.return_value = deployment("tesk-worker", [f"{REPOSITORY}:1.0.0"])
+    assert notify_one(app, "tesk-worker")[1] == 202
+    mock_read.return_value = deployment("tesk-worker", now)
+    executor.run()
+    mock_patch.assert_not_called()
+    assert controllers._deliveries[("tesk-worker", REPOSITORY)].state == state
+
+
+@pytest.mark.parametrize("label", ["=api", " = "])
+@patch(PATCH)
+@patch(READ, new=read)
+def test_label_without_key_matches_none(
+    mock_patch: MagicMock,
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    label: str,
+) -> None:
+    """Test that a label setting without a key limits to no deployment."""
+    monkeypatch.setenv("DEPLOYMENT_LABEL", label)
+    with pytest.raises(NotFound):
+        notify_all(app)
+    mock_patch.assert_not_called()
+
+
+@patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
+@patch(CHECK, return_value=True)
+@patch(READ, new=read)
+def test_all_deployments_lists_only_rollouts(
+    mock_check: MagicMock,
+    mock_patch: MagicMock,
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that 202 lists only the deployments that roll out."""
+    monkeypatch.setitem(
+        DEPLOYMENTS, "tesk-worker", deployment("tesk-worker", [f"{REPOSITORY}:1.2.0"])
+    )
+    response, code = notify_all(app)
+    assert code == 202
+    assert [item["name"] for item in response.json["deployments"]] == ["tesk-api"]

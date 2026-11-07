@@ -418,9 +418,10 @@ def updateDeployments() -> tuple[Response, int]:
     `GET /deployment/{deployment-name}` reports.
 
     Returns:
-        JSON response with the name and the (new) image of each deployment
-        that uses the repository, and status code 202, or 200 if all of them
-        already use the image: then nothing is rolled out.
+        JSON response with the name and the new image of each deployment that
+        rolls out, and status code 202; or, if all deployments that use the
+        repository already use the image, with each of them and its image,
+        and status code 200: then nothing is rolled out.
 
     Raises:
         Unauthorized: If the token is missing or wrong.
@@ -440,15 +441,20 @@ def updateDeployments() -> tuple[Response, int]:
             plans.append((deployment.metadata.name, *plan))
     if not plans:
         raise NotFound
-    started = False
+    rolling_out = []
     for name, image, changes in plans:
-        started |= _start_delivery(name, image, image_repo, image_tag, changes)
+        if _start_delivery(name, image, image_repo, image_tag, changes):
+            rolling_out.append((name, image, changes))
+    started = bool(rolling_out)
     message = (
         "Updating images in progress..."
         if started
         else "Deployments already use this image."
     )
-    deployments = [{"name": name, "image": image} for name, image, _ in plans]
+    deployments = [
+        {"name": name, "image": image}
+        for name, image, _ in (rolling_out if started else plans)
+    ]
     return jsonify({"message": message, "deployments": deployments}), (
         202 if started else 200
     )
@@ -508,10 +514,15 @@ def _managed_deployments() -> list[Any]:
                 logger.warning("Deployment %s not found; skipped.", name)
     except ApiException as exc:
         _raise_api_error(exc)
-    key, has_value, value = os.getenv("DEPLOYMENT_LABEL", "").partition("=")
+    setting = os.getenv("DEPLOYMENT_LABEL", "").strip()
+    if not setting:
+        return deployments
+    key, has_value, value = setting.partition("=")
     key, value = key.strip(), value.strip()
     if not key:
-        return deployments
+        # Matches none, rather than all deployments
+        logger.error("DEPLOYMENT_LABEL has no label key; no deployment matches.")
+        return []
     return [
         deployment
         for deployment in deployments
@@ -527,7 +538,8 @@ def _plan_update(
 
     Each container keeps its spelling of the repository, so only the tag
     changes. Containers that use the tag already (an image without a tag
-    means `latest`, and one with a digest stays as it is) aren't changed.
+    means `latest`, and one with a digest keeps it then) aren't changed; the
+    others lose their digest, if any, as the new tag replaces it.
 
     Args:
         deployment: Deployment as returned by the Kubernetes client.
@@ -569,9 +581,8 @@ def _start_delivery(
 ) -> bool:
     """Start the delivery of an image to a deployment, if it needs one.
 
-    The JSON patch first tests that each container still has the image it was
-    planned for, so that a deployment changed during the wait for the image
-    fails the delivery instead of getting an image in another container.
+    The delivery plans its patch anew from the deployment as it is right
+    before the patch (see `_deliver`); this plan is for the response.
 
     Args:
         deployment_name: Name of the deployment.
@@ -590,13 +601,6 @@ def _start_delivery(
         with _lock:
             _deliveries.pop(key, None)
         return False
-    patch = []
-    for index, old_image, new_image in changes:
-        path = f"/spec/template/spec/containers/{index}/image"
-        patch += [
-            {"op": "test", "value": old_image, "path": path},
-            {"op": "replace", "value": new_image, "path": path},
-        ]
     delivery = _Delivery(
         image=image,
         targets=[(index, new_image) for index, _, new_image in changes],
@@ -605,8 +609,32 @@ def _start_delivery(
         # Last in the order of the records, as the newest notification
         _deliveries.pop(key, None)
         _deliveries[key] = delivery
-    _executor.submit(_deliver, delivery, image_repo, image_tag, deployment_name, patch)
+    _executor.submit(_deliver, delivery, image_repo, image_tag, deployment_name)
     return True
+
+
+def _json_patch(changes: list[tuple[int, str, str]]) -> list[dict[str, str]]:
+    """Build the JSON patch for the images of containers.
+
+    Each replacement is preceded by a test of the current image, so that a
+    deployment changed since it was read fails the patch instead of getting
+    an image in another container.
+
+    Args:
+        changes: Containers to change, each with its index, its current and
+            its new image.
+
+    Returns:
+        The JSON patch.
+    """
+    patch = []
+    for index, old_image, new_image in changes:
+        path = f"/spec/template/spec/containers/{index}/image"
+        patch += [
+            {"op": "test", "value": old_image, "path": path},
+            {"op": "replace", "value": new_image, "path": path},
+        ]
+    return patch
 
 
 def _is_current(delivery: _Delivery, deployment_name: str, image_repo: str) -> bool:
@@ -630,21 +658,23 @@ def _deliver(
     image_repo: str,
     image_tag: str,
     deployment_name: str,
-    patch: list[dict[str, str]],
 ) -> None:
     """Wait for an image, then patch the deployment, and record the outcome.
 
     A delivery that a newer notification has replaced stops, also if it is
     replaced just before its patch (checked again under the deployment's
-    patch lock). The Kubernetes API is called outside the lock of the
-    records, so that status reports don't wait for it.
+    patch lock). Under that lock, the deployment is read again and the patch
+    planned anew, so that containers added, removed or reordered, or patched
+    by an older delivery, during the wait count; a deployment that no longer
+    uses the repository fails the delivery. The Kubernetes API is called
+    outside the lock of the records, so that status reports don't wait for
+    it.
 
     Args:
         delivery: Record of this delivery.
         image_repo: Canonical repository of the image.
         image_tag: Tag of the image.
         deployment_name: Name of the deployment.
-        patch: JSON patch for the deployment.
     """
     try:
         if not _wait_for_image(image_repo, image_tag, delivery, deployment_name):
@@ -656,12 +686,24 @@ def _deliver(
             if not _is_current(delivery, deployment_name, image_repo):
                 logger.info("Skipping a superseded delivery.")
                 return
-            patched: Any = apiV1.patch_namespaced_deployment(
-                name=deployment_name,
-                namespace=namespace,
-                body=_current_tests(deployment_name, patch),
-                _request_timeout=REQUEST_TIMEOUT,
-            )
+            deployment, _ = _read_deployment(deployment_name)
+            plan = _plan_update(deployment, image_repo, image_tag)
+            if plan is None:
+                _fail(delivery, "The deployment no longer uses the image repository.")
+                return
+            image, changes = plan
+            with _lock:
+                delivery.image = image
+                if changes:
+                    delivery.targets = [(index, new) for index, _, new in changes]
+            patched: Any = deployment
+            if changes:
+                patched = apiV1.patch_namespaced_deployment(
+                    name=deployment_name,
+                    namespace=namespace,
+                    body=_json_patch(changes),
+                    _request_timeout=REQUEST_TIMEOUT,
+                )
             with _lock:
                 delivery.state = "patched"
                 delivery.generation = patched.metadata.generation
@@ -672,40 +714,6 @@ def _deliver(
     except Exception:
         logger.exception("Deployment could not be updated.")
         _fail(delivery, "Deployment could not be updated.")
-
-
-def _current_tests(
-    deployment_name: str, patch: list[dict[str, str]]
-) -> list[dict[str, str]]:
-    """Update the tests of a JSON patch to the deployment as it is now.
-
-    A delivery that patched the deployment since the notification was planned
-    (e.g., an older one of the same image repository) changed the tag of the
-    containers to update: their tests then expect the current image, as long
-    as it is of the same repository. A container that now has another
-    repository (e.g., after the containers were reordered) keeps the planned
-    test, which fails the patch.
-
-    Args:
-        deployment_name: Name of the deployment.
-        patch: JSON patch for the deployment.
-
-    Returns:
-        The patch, with the tests updated.
-    """
-    deployment, _ = _read_deployment(deployment_name)
-    containers = deployment.spec.template.spec.containers
-    updated = []
-    for operation in patch:
-        current = operation
-        if operation["op"] == "test":
-            index = int(operation["path"].split("/")[-2])
-            if index < len(containers):
-                image = containers[index].image
-                if _parse_image(image)[0] == _parse_image(operation["value"])[0]:
-                    current = {**operation, "value": image}
-        updated.append(current)
-    return updated
 
 
 def _fail(delivery: _Delivery, detail: str) -> None:

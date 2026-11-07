@@ -333,8 +333,10 @@ components:
           description: Human-readable description.
         deployments:
           type: array
-          description: Deployments that use the image repository, with the
-           image of their first container of it, after the rollout.
+          description: With 202, the deployments that roll out, each with
+           the requested image of its first container of the repository; with
+           200, all deployments that use the repository, with the image they
+           already use.
           items:
             type: object
             properties:
@@ -344,7 +346,8 @@ components:
                 example: tesk-api
               image:
                 type: string
-                description: Image to be rolled out, or in use already.
+                description: Requested image (not yet rolled out with 202),
+                 or the image in use (200).
                 example: elixircloud/tesk-api:1.2.0
             required:
               - name
@@ -379,8 +382,11 @@ components:
           description: Replicas that are available.
         requested_image:
           type: string
-          description: Image of the last notification, if the sidecar received
-           one since it started.
+          description: Requested image of the delivery that `status` reports,
+           if the sidecar received a notification since it started. With
+           several image repositories in the deployment, a failed delivery,
+           then a waiting one, counts over the others; otherwise the last
+           notification.
           example: elixircloud/tesk-api:1.2.0
         detail:
           type: string

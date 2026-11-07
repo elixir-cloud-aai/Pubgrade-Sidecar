@@ -576,8 +576,6 @@ def test_delivery_superseded_after_wait_does_not_patch(mock_patch: MagicMock) ->
         return True
 
     with patch.object(controllers, "_wait_for_image", replaced_after_wait):
-        controllers._deliver(
-            older, "elixircloud/tesk-api", "1.2.0", "tesk-api", [{"op": "replace"}]
-        )
+        controllers._deliver(older, "elixircloud/tesk-api", "1.2.0", "tesk-api")
     mock_patch.assert_not_called()
     assert older.state == "waiting_for_image"

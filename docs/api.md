@@ -41,9 +41,10 @@ images, or several deployments of one image: subscribe it once per image
 repository. In every deployment the sidecar manages (`targetDeployments` of
 the chart; with `deploymentLabel`, only those with that label, see
 [Deployment](deployment.md)), every container whose image repository equals
-`image_name` gets the new tag. Other containers stay as they are. The response
-lists the deployments that use the repository, with the image of their first
-container of it:
+`image_name` gets the new tag. Other containers stay as they are. With 202,
+the response lists the deployments that roll out, with the requested image of
+their first container of the repository (with 200, all deployments that use
+it, with the image they use):
 
 ```json
 {
@@ -140,9 +141,11 @@ A deployment with containers of several image repositories keeps the last
 notification per repository, so that they don't replace each other. A failed
 delivery of any of them, then a waiting one, counts over the deployment's own
 status, and `requested_image` names its image; otherwise `requested_image` is
-the image of the last notification. A delivery fails, without changing the
-deployment, if a container to update no longer uses the image repository it used
-when the notification arrived, e.g., after its containers were reordered.
+the image of the last notification. Right before its patch, a delivery
+reads the deployment again: containers added, removed or reordered meanwhile
+count, and a deployment that no longer uses the image repository fails the
+delivery, without a change. Containers pinned by a digest lose it when they
+get a new tag.
 
 `requested_image` and `detail` are kept in memory: a restart loses a notification
 that is still waiting for its image, without a report. Afterwards, `status` only
