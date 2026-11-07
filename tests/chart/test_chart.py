@@ -191,3 +191,18 @@ def test_ingress_uses_tls() -> None:
     assert spec["tls"] == [{"hosts": ["a.example.org"], "secretName": "sidecar-tls"}]
     assert spec["ingressClassName"] == "nginx"
     assert "Route" not in resources
+
+
+def test_targets_and_label_reach_sidecar() -> None:
+    """Test that the sidecar knows its deployments and their label."""
+    resources = render("targetDeployments[1]=tesk-worker", "deploymentLabel=tier=api")
+    container = resources["Deployment"]["spec"]["template"]["spec"]["containers"][0]
+    variables = {variable["name"]: variable for variable in container["env"]}
+    assert variables["TARGET_DEPLOYMENTS"]["value"] == "tesk-api,tesk-worker"
+    assert variables["DEPLOYMENT_LABEL"]["value"] == "tier=api"
+
+
+def test_no_label_by_default() -> None:
+    """Test that without a label, all target deployments count."""
+    container = render()["Deployment"]["spec"]["template"]["spec"]["containers"][0]
+    assert "DEPLOYMENT_LABEL" not in {variable["name"] for variable in container["env"]}

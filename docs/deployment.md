@@ -46,6 +46,15 @@ default security constraints apply.
    (see [Image](#image)). Until the first release, that version has no image
    yet: set `image.tag` to `sha-<commit>` or `dev`.
 
+`PUT /deployment` updates all `targetDeployments` that use the notified image
+repository (see [API](api.md)). To limit it to some of them, set
+`deploymentLabel` to a label they have, `key=value`, or `key` for any value (a
+value without a key, e.g., `=api`, matches no deployment);
+`PUT /deployment/{name}` isn't limited by it. Outside the chart, the sidecar
+takes these settings from the environment variables `TARGET_DEPLOYMENTS`
+(comma-separated names; without it, all deployments in the namespace, which
+needs the right to list them) and `DEPLOYMENT_LABEL`.
+
 The sidecar gets `get` and `patch` on the `targetDeployments` and nothing else.
 So with the chart, `GET /deployment` and `DELETE /deployment/{name}` are refused:
 they would need further rights, which you can add with a Role of your own.
@@ -75,6 +84,16 @@ change until the first release. If you pull `latest` (or deployed the chart
 with its default tag) to follow development, switch to `sha-<commit>` (or
 `dev`), or to a release once there is one; until the first release, set
 `image.tag` when you install the chart (see above).
+
+## Upgrading to version 3.1.0 of the API
+
+Version 3.1.0 of the API adds `PUT /deployment`, for all deployments that use
+an image repository (see [API](api.md)), and the chart value
+`deploymentLabel`. Existing calls stay, with one change:
+`PUT /deployment/{deployment-name}` updates every container of the
+deployment whose image repository equals `image_name`. Before, it updated
+only the first container, and answered 409 if that one used another
+repository; now a 409 means that no container uses it.
 
 ## Upgrading to version 3.0.0 of the API
 

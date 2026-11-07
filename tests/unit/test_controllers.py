@@ -253,17 +253,6 @@ def test_update_deployment(mock_executor: MagicMock, mock_check: MagicMock) -> N
     function, delivery, *args = mock_executor.submit.call_args.args
     assert function is controllers._deliver
     assert delivery.image == image
-    assert args == [
-        "akash7778/pubgrade",
-        "1.0",
-        "pubgrade",
-        [
-            {
-                "op": "replace",
-                "value": image,
-                "path": "/spec/template/spec/containers/0/image",
-            }
-        ],
-    ]
+    assert args == ["akash7778/pubgrade", "1.0", "pubgrade"]
     # The image is checked in the background only
     mock_check.assert_not_called()
