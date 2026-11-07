@@ -16,7 +16,7 @@ from pubgrade_sidecar.errors.exceptions import ImageRepositoryMismatch
 TOKEN = "test-token"
 READ = "kubernetes.client.AppsV1Api.read_namespaced_deployment"
 PATCH = "kubernetes.client.AppsV1Api.patch_namespaced_deployment"
-CHECK = "pubgrade_sidecar.controllers.check_docker_image_availability"
+CHECK = "pubgrade_sidecar.controllers.check_image_availability"
 
 
 class ImmediateExecutor:
@@ -540,23 +540,6 @@ def test_superseded_delivery_stops_waiting(
     notify(app, "elixircloud/tesk-api")
     assert calls == ["1.2.0"]
     mock_patch.assert_not_called()
-
-
-@patch("pubgrade_sidecar.controllers.requests.get")
-def test_check_image_uses_timeout(mock_get: MagicMock) -> None:
-    """Test that the check for the image can't block for ever."""
-    mock_get.return_value.status_code = 200
-    assert controllers.check_docker_image_availability("org/app", "1")
-    assert mock_get.call_args.kwargs["timeout"] > 0
-
-
-@patch(
-    "pubgrade_sidecar.controllers.requests.get",
-    side_effect=controllers.requests.ConnectionError,
-)
-def test_check_image_network_error(mock_get: MagicMock) -> None:
-    """Test that a network error counts as image not available yet."""
-    assert not controllers.check_docker_image_availability("org/app", "1")
 
 
 @patch(PATCH)

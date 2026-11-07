@@ -18,7 +18,7 @@ from werkzeug.exceptions import (
 
 
 class DockerImageUnavailable(NotFound):
-    """Raised when the image of a notification isn't on Docker Hub.
+    """Raised when the image of a notification isn't in its registry.
 
     Only raised in the background, while a delivery waits for the image, so
     never returned to clients.
@@ -29,12 +29,6 @@ class DockerImageUnavailable(NotFound):
 
 class ImageRepositoryMismatch(Conflict):
     """Raised when a notification is for another image repository."""
-
-    pass
-
-
-class ImageRegistryUnsupported(Conflict):
-    """Raised when a notification is for an image that isn't on Docker Hub."""
 
     pass
 
@@ -77,11 +71,6 @@ exceptions = {
         "title": "Forbidden",
         "status": 403,
         "detail": "The sidecar may not access this deployment.",
-    },
-    ImageRegistryUnsupported: {
-        "title": "Conflict",
-        "status": 409,
-        "detail": "Only images on Docker Hub can be rolled out.",
     },
     ImageRepositoryMismatch: {
         "title": "Conflict",

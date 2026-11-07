@@ -229,9 +229,7 @@ def test_delete_deployment_unauthorized() -> None:
     "kubernetes.client.AppsV1Api.read_namespaced_deployment",
     mock_read_namespaced_deployment,
 )
-@patch(
-    "pubgrade_sidecar.controllers.check_docker_image_availability", return_value=True
-)
+@patch("pubgrade_sidecar.controllers.check_image_availability", return_value=True)
 @patch("pubgrade_sidecar.controllers._executor")
 def test_update_deployment(mock_executor: MagicMock, mock_check: MagicMock) -> None:
     """Test that a notification is accepted and its delivery started."""

@@ -12,16 +12,13 @@ import pytest
 from werkzeug.exceptions import BadRequest, Forbidden, InternalServerError, NotFound
 
 from pubgrade_sidecar import controllers
-from pubgrade_sidecar.errors.exceptions import (
-    ImageRegistryUnsupported,
-    ImageRepositoryMismatch,
-)
+from pubgrade_sidecar.errors.exceptions import ImageRepositoryMismatch
 
 TOKEN = "test-token"
 READ = "kubernetes.client.AppsV1Api.read_namespaced_deployment"
 LIST = "kubernetes.client.AppsV1Api.list_namespaced_deployment"
 PATCH = "kubernetes.client.AppsV1Api.patch_namespaced_deployment"
-CHECK = "pubgrade_sidecar.controllers.check_docker_image_availability"
+CHECK = "pubgrade_sidecar.controllers.check_image_availability"
 REPOSITORY = "elixircloud/tesk-api"
 
 
@@ -379,25 +376,32 @@ def test_all_deployments_list_fails(
         notify_all(app)
 
 
-@pytest.mark.parametrize(
-    "image_name,tag,error",
-    [
-        (REPOSITORY, "a/b", BadRequest),
-        ("quay.io/org/app", "1.2.0", ImageRegistryUnsupported),
-    ],
-)
 @patch(READ)
-def test_all_deployments_rejected_up_front(
-    mock_read: MagicMock,
-    app: Flask,
-    image_name: str,
-    tag: str,
-    error: type[Exception],
-) -> None:
-    """Test that invalid tags and other registries need no cluster."""
-    with pytest.raises(error):
-        notify_all(app, image_name=image_name, tag=tag)
+def test_all_deployments_invalid_tag(mock_read: MagicMock, app: Flask) -> None:
+    """Test that an invalid tag needs no cluster."""
+    with pytest.raises(BadRequest):
+        notify_all(app, tag="a/b")
     mock_read.assert_not_called()
+
+
+@patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
+@patch(CHECK, return_value=True)
+@patch(READ, new=read)
+def test_one_deployment_other_registry(
+    mock_check: MagicMock,
+    mock_patch: MagicMock,
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that images of other registries are rolled out too."""
+    image = "harbor.example.org:8443/project/app"
+    monkeypatch.setitem(
+        DEPLOYMENTS, "harbor-app", deployment("harbor-app", [f"{image}:1.0"])
+    )
+    response, code = notify_one(app, "harbor-app", image_name=image)
+    assert code == 202
+    assert response.json["image"] == f"{image}:1.2.0"
+    mock_check.assert_called_once_with(image, "1.2.0")
 
 
 class DeferredExecutor:

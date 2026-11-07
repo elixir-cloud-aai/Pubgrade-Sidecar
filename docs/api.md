@@ -78,8 +78,12 @@ A notification of a new image returns at once, with status 202; the rollout
 runs in the background. If the deployments already use the image, it returns
 200 and nothing happens. Only the tag can change, and `docker.io/<repository>` and
 `<repository>` count as the same repository. The sidecar waits for the image
-on Docker Hub, about two minutes at most, so only images hosted there can be
-rolled out. Use a new tag for every release: a tag that the deployment already
+in its registry, about two minutes at most: Docker Hub for repositories without
+a registry host, otherwise the registry named in the repository, e.g.,
+`harbor.example.org/project/tesk-api`. Any registry that serves the OCI
+distribution API works (Docker Hub, Harbor, GitLab, Quay, GHCR, `registry:2`
+and others); for private images, the sidecar needs credentials (see
+[Deployment](deployment.md#registries)). Use a new tag for every release: a tag that the deployment already
 uses, like one pushed again, doesn't lead to a rollout.
 
 ```text
@@ -92,8 +96,8 @@ Status  Meaning
 404     Deployment not found; for `PUT /deployment`: no container uses the
         repository
 405     Method not allowed
-409     No container of the deployment uses the image repository, or it isn't
-        on Docker Hub; nothing changed
+409     No container of the deployment uses the image repository; nothing
+        changed
 413     Request body larger than 64 KiB
 415     Media type not supported
 500     The Kubernetes API failed; try again

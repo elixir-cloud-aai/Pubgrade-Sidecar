@@ -134,17 +134,14 @@ def test_notification_rejected(client: Any, image: str) -> None:
 
 
 def test_notification_for_other_registry(client: Any) -> None:
-    """Test that images on other registries are rejected up front."""
+    """Test that images of other registries are accepted."""
     image = "quay.io/org/app"
     with patch(READ, return_value=deployment(f"{image}:1.0")):
         response = client.put(
             URL, headers=TOKEN, json={"image_name": image, "tag": "2.0"}
         )
-    assert response.status_code == 409
-    assert response.mimetype == "application/problem+json"
-    assert response.json["status"] == 409
-    assert "Docker Hub" in response.json["detail"]
-    cast(MagicMock, controllers._executor).submit.assert_not_called()
+    assert response.status_code == 202
+    assert response.json["image"] == f"{image}:2.0"
 
 
 def test_status_report(client: Any) -> None:
