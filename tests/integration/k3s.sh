@@ -325,7 +325,8 @@ expect "repository without Deployments" 404 \
 expect "notification accepted" 202 \
   "$(call site-a PUT /deployment "${TOKEN}" \
     "{\"image_name\": \"${TARGET_REPO}\", \"tag\": \"${NEW_TAG}\"}")"
-expect "Deployments that use the repository" '["tesk-api","tesk-worker"]' \
+# tesk-api already has the tag, so only tesk-worker rolls out
+expect "Deployments that roll out" '["tesk-worker"]' \
   "$(jq --compact-output '[.deployments[].name]' "${WORK}/body")"
 want="${TARGET_REPO}:${NEW_TAG} docker.io/${TARGET_REPO}:${NEW_TAG} ${OTHER_IMAGE}"
 if retry 60 3 "the containers of tesk-worker" has_images site-a tesk-worker "${want}"; then
