@@ -302,7 +302,8 @@ expect "bystander unchanged" "|${TARGET_REPO}:${OLD_TAG}|" \
 echo "== image that doesn't exist"
 expect "notification accepted" 202 \
   "$(notify site-a tesk-api "${TARGET_REPO}" "${MISSING_TAG}")"
-# The sidecar looks the tag up on Docker Hub at once, then retries every 30 s
+# The sidecar looks the tag up in its registry (Docker Hub) at once, then
+# retries every 30 s
 sleep 10
 expect "status waiting for the image" '"status":"waiting_for_image"' \
   "$(report site-a)"
@@ -313,7 +314,7 @@ out="$(await_report site-a '.status == "failed"')"
 expect "status failed" '"status":"failed"' "${out}"
 # The sidecar's explanation of a missing image
 expect "failure explained" \
-  '|Image not available, or Docker Hub not reachable.|' \
+  '|Image not available, or its registry not reachable.|' \
   "|$(jq --raw-output .detail <<< "${out}")|"
 expect "Deployment unchanged after the failure" "|${TARGET_REPO}:${NEW_TAG}|" \
   "|$(image_of site-a tesk-api)|"

@@ -104,6 +104,14 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # A generic OCI registry, for the availability check against a real
+    # registry (`test_generic_oci_registry`)
+    services:
+      registry:
+        image: registry:2
+        ports: ["5000:5000"]
+    env:
+      OCI_REGISTRY: localhost:5000
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

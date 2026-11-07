@@ -206,3 +206,58 @@ def test_no_label_by_default() -> None:
     """Test that without a label, all target deployments count."""
     container = render()["Deployment"]["spec"]["template"]["spec"]["containers"][0]
     assert "DEPLOYMENT_LABEL" not in {variable["name"] for variable in container["env"]}
+
+
+def test_registry_credentials_mounted_from_secret() -> None:
+    """Test that registry credentials come from a mounted Secret."""
+    resources = render(
+        "registryCredentials.existingSecret=registry-auth",
+        "insecureRegistries[0]=registry.local:5000",
+        "insecureRegistries[1]=mirror.local",
+    )
+    pod = resources["Deployment"]["spec"]["template"]["spec"]
+    container = pod["containers"][0]
+    variables = {variable["name"]: variable for variable in container["env"]}
+    assert variables["REGISTRY_AUTH_FILE"]["value"] == (
+        "/etc/pubgrade-sidecar/registry/.dockerconfigjson"
+    )
+    assert variables["INSECURE_REGISTRIES"]["value"] == (
+        "registry.local:5000,mirror.local"
+    )
+    assert container["volumeMounts"] == [
+        {
+            "name": "registry-credentials",
+            "mountPath": "/etc/pubgrade-sidecar/registry",
+            "readOnly": True,
+        }
+    ]
+    assert pod["volumes"] == [
+        {
+            "name": "registry-credentials",
+            "secret": {
+                "secretName": "registry-auth",
+                "items": [{"key": ".dockerconfigjson", "path": ".dockerconfigjson"}],
+            },
+        }
+    ]
+
+
+def test_registry_credentials_key_can_be_set() -> None:
+    """Test that the key of the credentials in the Secret can be set."""
+    pod = render(
+        "registryCredentials.existingSecret=registry-auth",
+        "registryCredentials.key=config.json",
+    )["Deployment"]["spec"]["template"]["spec"]
+    assert pod["volumes"][0]["secret"]["items"] == [
+        {"key": "config.json", "path": ".dockerconfigjson"}
+    ]
+
+
+def test_no_registry_settings_by_default() -> None:
+    """Test that by default, registries are reached anonymously over HTTPS."""
+    pod = render()["Deployment"]["spec"]["template"]["spec"]
+    container = pod["containers"][0]
+    names = {variable["name"] for variable in container["env"]}
+    assert not names & {"REGISTRY_AUTH_FILE", "INSECURE_REGISTRIES"}
+    assert "volumeMounts" not in container
+    assert "volumes" not in pod

@@ -27,6 +27,24 @@ accessToken:
   existingSecret: ""
   key: access-token
 
+# Optional: an existing Secret with credentials for the registries of the
+# images, read only to check that an image is available before a rollout
+# (pull rights suffice). Without it, registries are asked anonymously, which
+# suffices for public images. A Secret of the type
+# `kubernetes.io/dockerconfigjson` works as it is, e.g.:
+#   kubectl create secret docker-registry registry-credentials \
+#     --docker-server=harbor.example.org --docker-username=<robot account> \
+#     --docker-password=<secret>
+registryCredentials:
+  existingSecret: ""
+  # Key of the credentials in the Secret; unused without `existingSecret`
+  key: .dockerconfigjson
+
+# Optional: registries (`host` or `host:port`) that are reached over HTTP
+# instead of HTTPS, e.g., a registry in the cluster. Credentials are sent to
+# them unencrypted
+insecureRegistries: []
+
 # Host name of the Route or Ingress
 hostName: ""
 

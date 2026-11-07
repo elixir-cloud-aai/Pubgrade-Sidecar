@@ -1,15 +1,18 @@
 """Controllers of the API: read and update the image tags of Deployments."""
 
+import base64
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 import hmac
+import json
 import logging
 import os
 import re
 import threading
 import time
 from typing import Any, NoReturn, cast
+from urllib.parse import urlsplit
 
 from flask import Response, jsonify, request
 from kubernetes import client, config
@@ -18,10 +21,9 @@ import requests
 
 from pubgrade_sidecar.errors.exceptions import (
     BadRequest,
-    DockerImageUnavailable,
     Forbidden,
-    ImageRegistryUnsupported,
     ImageRepositoryMismatch,
+    ImageUnavailable,
     InternalServerError,
     NotFound,
     Unauthorized,
@@ -62,6 +64,29 @@ MAX_RETRY = 3
 RETRY_INTERVAL = 30
 REQUEST_TIMEOUT = 10
 DOCKER_HUB_PREFIXES = ("docker.io/", "index.docker.io/")
+# The registry that serves Docker Hub's images, and the keys of its
+# credentials in Docker's configuration files
+DOCKER_HUB_REGISTRY = "registry-1.docker.io"
+DOCKER_HUB_KEYS = (
+    "https://index.docker.io/v1/",
+    "index.docker.io",
+    "docker.io",
+    DOCKER_HUB_REGISTRY,
+)
+# Manifests and indexes of images, for multi-platform images too
+MANIFEST_TYPES = ", ".join(
+    [
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    ]
+)
+# Largest response of a token service that is read, in bytes
+MAX_TOKEN_RESPONSE = 256 * 1024
+TOKEN_CHUNK_SIZE = 4096
+# Parameters of an authentication challenge (`WWW-Authenticate`)
+CHALLENGE_PARAMETER = re.compile(r'(\w+)="([^"]*)"')
 # The format of Docker image tags
 VALID_TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
 
@@ -387,7 +412,6 @@ def updateDeployment(deployment_name: str) -> tuple[Response, int]:
         BadRequest: If the tag is invalid.
         ImageRepositoryMismatch: If no container of the deployment uses the
             repository.
-        ImageRegistryUnsupported: If the image isn't on Docker Hub.
     """
     _check_token()
     image_repo, image_tag = _notification()
@@ -395,8 +419,6 @@ def updateDeployment(deployment_name: str) -> tuple[Response, int]:
     plan = _plan_update(deployment, image_repo, image_tag)
     if plan is None:
         raise ImageRepositoryMismatch
-    if not _is_on_docker_hub(image_repo):
-        raise ImageRegistryUnsupported
     image, changes = plan
     if not _start_delivery(deployment_name, image, image_repo, image_tag, changes):
         return jsonify(
@@ -426,14 +448,11 @@ def updateDeployments() -> tuple[Response, int]:
     Raises:
         Unauthorized: If the token is missing or wrong.
         BadRequest: If the tag is invalid.
-        ImageRegistryUnsupported: If the image isn't on Docker Hub.
         NotFound: If no container of these deployments uses the repository.
         Forbidden: If the sidecar has no right to read the deployments.
     """
     _check_token()
     image_repo, image_tag = _notification()
-    if not _is_on_docker_hub(image_repo):
-        raise ImageRegistryUnsupported
     plans = []
     for deployment in _managed_deployments():
         plan = _plan_update(deployment, image_repo, image_tag)
@@ -708,9 +727,9 @@ def _deliver(
                 delivery.state = "patched"
                 delivery.generation = patched.metadata.generation
                 delivery.uid = patched.metadata.uid
-    except DockerImageUnavailable:
+    except ImageUnavailable:
         logger.warning("Image of a notification isn't available.")
-        _fail(delivery, "Image not available, or Docker Hub not reachable.")
+        _fail(delivery, "Image not available, or its registry not reachable.")
     except Exception:
         logger.exception("Deployment could not be updated.")
         _fail(delivery, "Deployment could not be updated.")
@@ -746,32 +765,225 @@ def _wait_for_image(
         True once the image is available, False if the delivery was replaced.
 
     Raises:
-        DockerImageUnavailable: If the image is still missing after all tries.
+        ImageUnavailable: If the image is still missing after all tries.
     """
     for attempt in range(MAX_RETRY + 1):
         if not _is_current(delivery, deployment_name, image_repo):
             return False
-        if check_docker_image_availability(image_repo, image_tag):
+        if check_image_availability(image_repo, image_tag):
             return _is_current(delivery, deployment_name, image_repo)
         if attempt < MAX_RETRY:
             time.sleep(RETRY_INTERVAL)
-    raise DockerImageUnavailable
+    raise ImageUnavailable
 
 
-def check_docker_image_availability(image_name: str, tag: str = "latest") -> bool:
-    """Check whether Docker Hub has an image.
+def _registry(image_repo: str) -> tuple[str, str]:
+    """Split a canonical repository into its registry and its name there.
 
     Args:
-        image_name: Repository of the image.
+        image_repo: Canonical repository, see `_parse_image`.
+
+    Returns:
+        Host (with port, if any) of the registry and the repository's name in
+        it; Docker Hub for repositories without a registry host.
+    """
+    if _is_on_docker_hub(image_repo):
+        return DOCKER_HUB_REGISTRY, image_repo
+    host, _, name = image_repo.partition("/")
+    return host, name
+
+
+def _credentials(host: str) -> tuple[str, str] | None:
+    """Read the credentials for a registry.
+
+    They come from a Docker configuration file (`auths`, with `auth` or
+    `username` and `password` per registry) at the path in
+    `REGISTRY_AUTH_FILE`, e.g., a mounted Secret of the type
+    `kubernetes.io/dockerconfigjson`. Credential helpers and identity tokens
+    aren't supported. For Docker Hub, the first usable of its keys counts.
+
+    Args:
+        host: Host of the registry.
+
+    Returns:
+        User name and password, or None if there are none for the registry.
+    """
+    path = os.getenv("REGISTRY_AUTH_FILE")
+    if not path:
+        return None
+    keys = DOCKER_HUB_KEYS if host == DOCKER_HUB_REGISTRY else (host,)
+    try:
+        with open(path, encoding="utf-8") as stream:
+            auths = json.load(stream).get("auths", {})
+        entries = [(key, auths.get(key) or auths.get(f"https://{key}")) for key in keys]
+    except (OSError, ValueError, AttributeError):
+        # Without details, which could quote the file
+        logger.warning("Registry credentials could not be read.")
+        return None
+    for key, entry in entries:
+        if not entry:
+            continue
+        try:
+            if entry.get("auth"):
+                user, _, password = (
+                    base64.b64decode(entry["auth"], validate=True)
+                    .decode("utf-8")
+                    .partition(":")
+                )
+                return user, password
+            return entry["username"], entry["password"]
+        except (ValueError, KeyError, AttributeError, TypeError):
+            # The key is a registry host; the entry's content isn't logged
+            logger.warning(  # nosemgrep
+                "Registry credentials for %s could not be read: they need "
+                "`auth`, or `username` and `password`.",
+                key,
+            )
+    return None
+
+
+def _insecure_registries() -> list[str]:
+    """List the registries that are reached over HTTP.
+
+    Returns:
+        Hosts (with port, if any) in `INSECURE_REGISTRIES` (comma-separated).
+    """
+    return [
+        entry.strip()
+        for entry in os.getenv("INSECURE_REGISTRIES", "").split(",")
+        if entry.strip()
+    ]
+
+
+def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
+    """Request a token from the token service that a registry names.
+
+    Only token services over HTTPS are asked, as with Docker's own client,
+    or an insecure registry itself, with the registry's credentials (see
+    `_credentials`), if any. The response is read up to `MAX_TOKEN_RESPONSE`
+    bytes (plus at most one chunk), for `REQUEST_TIMEOUT` seconds in all.
+
+    Args:
+        fields: Parameters of the registry's challenge, with `realm`, the
+            URL of the token service.
+        host: Host of the registry.
+        scheme: Scheme of the registry's URL.
+
+    Returns:
+        The token, or None if there is none.
+
+    Raises:
+        requests.RequestException: If the token service can't be reached.
+        ValueError: If the response isn't JSON.
+        AttributeError: If the response isn't a JSON object.
+    """
+    realm = fields["realm"]
+    # Over HTTP, only an insecure registry's own token service, as the token
+    # (and credentials) would travel unencrypted
+    if not (
+        realm.startswith("https://")
+        or (scheme == "http" and realm.startswith(f"http://{host}/"))
+    ):
+        return None
+    deadline = time.monotonic() + REQUEST_TIMEOUT
+    token_response = requests.get(
+        realm,
+        params={key: fields[key] for key in ("service", "scope") if key in fields},
+        auth=_credentials(host),
+        timeout=REQUEST_TIMEOUT,
+        stream=True,
+    )
+    try:
+        if token_response.status_code != 200:
+            return None
+        content = b""
+        for chunk in token_response.iter_content(chunk_size=TOKEN_CHUNK_SIZE):
+            content += chunk
+            # Also a service that trickles its response stops in time
+            if len(content) > MAX_TOKEN_RESPONSE or time.monotonic() > deadline:
+                return None
+    finally:
+        token_response.close()
+    body = json.loads(content)
+    token = body.get("token") or body.get("access_token")
+    return token if isinstance(token, str) and token else None
+
+
+def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
+    """Ask a registry for a manifest, and authenticate if it asks for it.
+
+    Redirects are followed; `requests` drops the authorization on redirects
+    to other hosts or from HTTPS to HTTP. Only challenges of the registry
+    itself, with the scheme it was asked with, are answered, so that a host
+    it redirects to can't ask for its credentials.
+
+    Args:
+        url: URL of the manifest.
+        host: Host of the registry.
+        scheme: Scheme of the URL.
+
+    Returns:
+        The registry's last response.
+
+    Raises:
+        requests.RequestException: If the registry or its token service
+            can't be reached.
+        ValueError: If the token service's response isn't JSON.
+        AttributeError: If the token service's response isn't a JSON object.
+    """
+    headers = {"Accept": MANIFEST_TYPES}
+    response = requests.head(
+        url, headers=headers, timeout=REQUEST_TIMEOUT, allow_redirects=True
+    )
+    if response.status_code != 401:
+        return response
+    final = urlsplit(response.url) if response.history else None
+    if final and (final.scheme, final.netloc) != (scheme, host):
+        return response
+    kind, _, parameters = response.headers.get("WWW-Authenticate", "").partition(" ")
+    fields = dict(CHALLENGE_PARAMETER.findall(parameters))
+    if kind.lower() == "bearer" and "realm" in fields:
+        token = _bearer_token(fields, host, scheme)
+        if token is None:
+            return response
+        return requests.head(
+            url,
+            headers={**headers, "Authorization": f"Bearer {token}"},
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=True,
+        )
+    credentials = _credentials(host) if kind.lower() == "basic" else None
+    if credentials is None:
+        return response
+    return requests.head(
+        url,
+        headers=headers,
+        auth=credentials,
+        timeout=REQUEST_TIMEOUT,
+        allow_redirects=True,
+    )
+
+
+def check_image_availability(image_repo: str, tag: str = "latest") -> bool:
+    """Check whether the registry of an image has it.
+
+    Asks the registry for the image's manifest (OCI distribution API), over
+    HTTPS, or HTTP for the hosts in `INSECURE_REGISTRIES`, with a token or
+    Basic authentication if the registry asks for it (see `_head_manifest`).
+
+    Args:
+        image_repo: Canonical repository of the image, see `_parse_image`.
         tag: Tag of the image.
 
     Returns:
-        Whether the image is available. Network errors count as not available.
+        Whether the image is available. Network and authentication errors
+        count as not available.
     """
-    base_url = "https://hub.docker.com"
-    url = f"{base_url}/v2/repositories/{image_name}/tags/{tag}/"
+    host, name = _registry(image_repo)
+    scheme = "http" if host in _insecure_registries() else "https"
+    url = f"{scheme}://{host}/v2/{name}/manifests/{tag}"
     try:
-        response = requests.get(url, timeout=REQUEST_TIMEOUT)
-    except requests.RequestException:
+        response = _head_manifest(url, host, scheme)
+    except (requests.RequestException, ValueError, AttributeError):
         return False
     return response.status_code == 200

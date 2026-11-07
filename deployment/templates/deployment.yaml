@@ -47,6 +47,14 @@ spec:
             - name: DEPLOYMENT_LABEL
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.insecureRegistries }}
+            - name: INSECURE_REGISTRIES
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- if .Values.registryCredentials.existingSecret }}
+            - name: REGISTRY_AUTH_FILE
+              value: /etc/pubgrade-sidecar/registry/.dockerconfigjson
+            {{- end }}
             - name: ACCESS_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -64,3 +72,18 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if .Values.registryCredentials.existingSecret }}
+          volumeMounts:
+            - name: registry-credentials
+              mountPath: /etc/pubgrade-sidecar/registry
+              readOnly: true
+          {{- end }}
+      {{- with .Values.registryCredentials.existingSecret }}
+      volumes:
+        - name: registry-credentials
+          secret:
+            secretName: {{ . | quote }}
+            items:
+              - key: {{ $.Values.registryCredentials.key | quote }}
+                path: .dockerconfigjson
+      {{- end }}

@@ -30,9 +30,21 @@ ACCESS_TOKEN=local uv run python -m pubgrade_sidecar.app
 ```
 
 They need neither a cluster nor a Kubernetes configuration, and fail below 100%
-coverage. The chart tests in `tests/chart` run if Helm is installed. After
-changing dependencies in `pyproject.toml`, update the lock with `uv lock`; CI
-fails if it doesn't match.
+coverage. The chart tests in `tests/chart` run if Helm is installed. The test
+of the availability check against a real registry runs if `OCI_REGISTRY` names
+one that serves HTTP, as in CI:
+
+```bash
+docker run --detach --rm --name registry --publish 5000:5000 registry:2
+OCI_REGISTRY=localhost:5000 uv run pytest tests/unit/test_registry.py
+docker stop registry
+```
+
+It checks anonymous access only; token and Basic authentication are tested
+with mocked responses.
+
+After changing dependencies in `pyproject.toml`, update the lock with `uv lock`;
+CI fails if it doesn't match.
 
 The integration test runs the sidecar on a real, throw-away cluster: it builds
 the image, starts k3s in a Docker container, installs the chart into two

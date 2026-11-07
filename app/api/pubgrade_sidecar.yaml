@@ -269,7 +269,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Conflict:
-      description: 'Another image repository, or one not on Docker Hub
+      description: 'No container of the deployment uses the image repository
        ([RFC 7231](https://tools.ietf.org/html/rfc7231))'
       content:
         application/problem+json:

@@ -74,13 +74,18 @@ Every container of the deployment whose image repository equals `image_name`
 gets the new tag; if none does, the call gets a 409 (see
 [Upgrading to version 3.1.0 of the API](deployment.md#upgrading-to-version-310-of-the-api)).
 
-A notification of a new image returns at once, with status 202; the rollout
-runs in the background. If the deployments already use the image, it returns
-200 and nothing happens. Only the tag can change, and `docker.io/<repository>` and
-`<repository>` count as the same repository. The sidecar waits for the image
-on Docker Hub, about two minutes at most, so only images hosted there can be
-rolled out. Use a new tag for every release: a tag that the deployment already
-uses, like one pushed again, doesn't lead to a rollout.
+A notification of a new image returns at once, with status 202; the rollout runs
+in the background. If the deployments already use the image, it returns 200 and
+nothing happens. Only the tag can change, and `docker.io/<repository>` and
+`<repository>` count as the same repository. The sidecar waits for the image in
+its registry, about two minutes (longer if the registry answers slowly): Docker
+Hub for repositories without a registry host, otherwise the registry named in
+the repository, e.g., `harbor.example.org/project/tesk-api`. Any registry that
+implements the OCI distribution API should work, e.g., Harbor, GitLab, Quay or
+GHCR (CI tests the sidecar with `registry:2`); for private images, the sidecar
+needs credentials (see [Deployment](deployment.md#registries)). Use a new tag
+for every release: a tag that the deployment already uses, like one pushed
+again, doesn't lead to a rollout.
 
 ```text
 Status  Meaning
@@ -92,8 +97,8 @@ Status  Meaning
 404     Deployment not found; for `PUT /deployment`: no container uses the
         repository
 405     Method not allowed
-409     No container of the deployment uses the image repository, or it isn't
-        on Docker Hub; nothing changed
+409     No container of the deployment uses the image repository; nothing
+        changed
 413     Request body larger than 64 KiB
 415     Media type not supported
 500     The Kubernetes API failed; try again
