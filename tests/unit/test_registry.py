@@ -448,7 +448,8 @@ def test_next_docker_hub_key_after_unusable_entry(
     mock_head.side_effect = [bearer(), response(200)]
     assert check_image_availability("org/app", "1")
     assert mock_get.call_args.kwargs["auth"] == ("user", "pw")
-    assert "docker.io" in caplog.text
+    # The key of the unusable entry, not its content
+    assert ("docker.io",) in [record.args for record in caplog.records]
     assert "secret-value" not in caplog.text
 
 
@@ -464,7 +465,7 @@ class _Recorder(BaseHTTPRequestHandler):
         self.seen.append((host, self.headers.get("Authorization")))
         if self.redirect_to and not host.startswith("localhost"):
             self.send_response(307)
-            self.send_header("Location", f"{self.redirect_to}{self.path}")
+            self.send_header("Location", f"{self.redirect_to}/v2/org/app/manifests/1")
         else:
             self.send_response(401)
             self.send_header(
