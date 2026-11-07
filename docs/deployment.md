@@ -46,6 +46,14 @@ default security constraints apply.
    (see [Image](#image)). Until the first release, that version has no image
    yet: set `image.tag` to `sha-<commit>` or `dev`.
 
+`PUT /deployment` updates all `targetDeployments` that use the notified image
+repository (see [API](api.md)). To limit it to some of them, set
+`deploymentLabel` to a label they have, `key=value`, or `key` for any value;
+`PUT /deployment/{name}` isn't limited by it. Outside the chart, the sidecar
+takes these settings from the environment variables `TARGET_DEPLOYMENTS`
+(comma-separated names; without it, all deployments in the namespace, which
+needs the right to list them) and `DEPLOYMENT_LABEL`.
+
 The sidecar gets `get` and `patch` on the `targetDeployments` and nothing else.
 So with the chart, `GET /deployment` and `DELETE /deployment/{name}` are refused:
 they would need further rights, which you can add with a Role of your own.

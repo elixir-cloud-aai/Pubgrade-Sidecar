@@ -205,3 +205,20 @@ def test_main_runs_development_server() -> None:
     with patch.object(App, "run") as run:
         sidecar_app.main()
     run.assert_called_once_with(port=8080)
+
+
+def test_notification_for_all_deployments(
+    client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that a notification for all deployments is routed and validated."""
+    monkeypatch.setenv("TARGET_DEPLOYMENTS", "tesk-api")
+    with patch(READ, return_value=deployment("elixircloud/tesk-api:1.1.0")) as read:
+        read.return_value.metadata.name = "tesk-api"
+        response = client.put("/deployment", headers=TOKEN, json=BODY)
+        assert response.status_code == 202
+        assert response.json["deployments"] == [
+            {"name": "tesk-api", "image": "elixircloud/tesk-api:1.2.0"}
+        ]
+        assert client.put("/deployment", headers=TOKEN, json={}).status_code == 400
+        other = {**BODY, "image_name": "elixircloud/other"}
+        assert client.put("/deployment", headers=TOKEN, json=other).status_code == 404

@@ -14,6 +14,10 @@ image:
 # upgrade. It gets `get` and `patch` on these only
 targetDeployments: []
 
+# Optional: a label, `key=value` (or `key` for any value). `PUT /deployment`
+# then updates only those of the `targetDeployments` that have it
+deploymentLabel: ""
+
 # Required: an existing Secret with the access token, which callers send as
 # `X-Access-Token`. Create it yourself, so that the token stays out of values
 # files, e.g.:

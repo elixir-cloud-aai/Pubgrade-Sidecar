@@ -1,7 +1,7 @@
 openapi: 3.0.2
 info:
   title: Sidecar service to update deployment on k8s-cluster
-  version: 3.0.0
+  version: 3.1.0
   description: >
     The project is to implement a microservice which would be co-deployed along
     with pubgrade in Kubernetes cluster at deployments to listen for update
@@ -39,6 +39,61 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      summary: 'Roll out a new image tag to all deployments that use its
+       repository'
+      description: 'In every deployment that the sidecar manages
+       (`TARGET_DEPLOYMENTS`, or all in its namespace; only those with the
+       label `DEPLOYMENT_LABEL`, if set), every container whose image
+       repository equals `image_name` gets the new tag.'
+      operationId: updateDeployments
+      tags:
+        - deployment
+      parameters:
+        - in: header
+          name: X-Access-Token
+          required: true
+          schema:
+            type: string
+          description: Secret used to identify source of request.
+      requestBody:
+        description: Image repository and new tag
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Deployment'
+      responses:
+        '200':
+          description: 'All deployments that use the repository already use
+           this image; nothing is rolled out.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveriesAccepted'
+        '202':
+          description: 'The notification is accepted. The rollouts run in the
+           background; GET on each deployment reports its status.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveriesAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/ContentTooLarge'
         '500':
           $ref: '#/components/responses/InternalServerError'
         default:
@@ -82,7 +137,8 @@ paths:
         default:
           $ref: '#/components/responses/Error'
     put:
-      summary: 'Modify specified already deployed deployment on the cluster'
+      summary: 'Roll out a new image tag to the containers of a deployment
+       that use its repository'
       operationId: updateDeployment
       tags:
         - deployment
@@ -268,6 +324,34 @@ components:
       required:
         - message
         - image
+    DeliveriesAccepted:
+      type: object
+      description: 'Accepted notification for all deployments'
+      properties:
+        message:
+          type: string
+          description: Human-readable description.
+        deployments:
+          type: array
+          description: Deployments that use the image repository, with the
+           image of their first container of it, after the rollout.
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Name of the deployment.
+                example: tesk-api
+              image:
+                type: string
+                description: Image to be rolled out, or in use already.
+                example: elixircloud/tesk-api:1.2.0
+            required:
+              - name
+              - image
+      required:
+        - message
+        - deployments
     DeploymentStatus:
       type: object
       description: 'Image and rollout status of a deployment'

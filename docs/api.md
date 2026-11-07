@@ -26,7 +26,41 @@ curl --location --request GET 'https://{sidecar-host}/deployment/{deployment-nam
   --header 'X-Access-Token: {access-token}'
 ```
 
-Notify the sidecar of a new image tag for a deployment:
+Notify the sidecar of a new image tag for all deployments that use its
+repository (since version 3.1.0 of the API):
+
+```bash
+curl --location --request PUT 'https://{sidecar-host}/deployment' \
+  --header 'X-Access-Token: {access-token}' \
+  --header 'Content-Type: application/json' \
+  --data-raw '{"image_name": "elixircloud/tesk-api", "tag": "1.2.0"}'
+```
+
+This is the callback URL to subscribe in Pubgrade for a service with several
+images, or several deployments of one image: subscribe it once per image
+repository. In every deployment the sidecar manages (`targetDeployments` of
+the chart; with `deploymentLabel`, only those with that label, see
+[Deployment](deployment.md)), every container whose image repository equals
+`image_name` gets the new tag. Other containers stay as they are. The response
+lists the deployments that use the repository, with the image of their first
+container of it:
+
+```json
+{
+  "message": "Updating images in progress...",
+  "deployments": [
+    {"name": "tesk-api", "image": "elixircloud/tesk-api:1.2.0"},
+    {"name": "tesk-worker", "image": "elixircloud/tesk-api:1.2.0"}
+  ]
+}
+```
+
+Each deployment gets its own delivery, whose state `GET
+/deployment/{deployment-name}` reports. If no container of these deployments
+uses the repository, the call gets a 404; a listed deployment that doesn't
+exist is skipped.
+
+Notify the sidecar of a new image tag for one deployment:
 
 ```bash
 curl --location --request PUT 'https://{sidecar-host}/deployment/{deployment-name}' \
@@ -35,8 +69,12 @@ curl --location --request PUT 'https://{sidecar-host}/deployment/{deployment-nam
   --data-raw '{"image_name": "elixircloud/tesk-api", "tag": "1.2.0"}'
 ```
 
+Every container of the deployment whose image repository equals `image_name`
+gets the new tag (before version 3.1.0 of the API: only the first container,
+which had to use the repository); if none does, the call gets a 409.
+
 A notification of a new image returns at once, with status 202; the rollout
-runs in the background. If the deployment already uses the image, it returns
+runs in the background. If the deployments already use the image, it returns
 200 and nothing happens. Only the tag can change, and `docker.io/<repository>` and
 `<repository>` count as the same repository. The sidecar waits for the image
 on Docker Hub, about two minutes at most, so only images hosted there can be
@@ -50,9 +88,11 @@ Status  Meaning
 400     Invalid request, e.g., no `X-Access-Token` header or an invalid tag
 401     Wrong token, or no token configured in the sidecar
 403     The sidecar may not access this deployment
-404     Deployment not found
+404     Deployment not found; for `PUT /deployment`: no container uses the
+        repository
 405     Method not allowed
-409     Another image repository, or one not on Docker Hub; nothing changed
+409     No container of the deployment uses the image repository, or it isn't
+        on Docker Hub; nothing changed
 413     Request body larger than 64 KiB
 415     Media type not supported
 500     The Kubernetes API failed; try again
@@ -90,7 +130,8 @@ the API, it returns this object instead of only the image:
 }
 ```
 
-`status` is `waiting_for_image`, `rolling_out`, `complete` or `failed` (with
+`image` is the image of the deployment's first container. `status` is
+`waiting_for_image`, `rolling_out`, `complete` or `failed` (with
 an explanation in `detail`). A failure counts until the deployment has the
 requested image, and a change of the deployment after a rollout, e.g., a
 rollback, counts over the last notification. A newer notification replaces

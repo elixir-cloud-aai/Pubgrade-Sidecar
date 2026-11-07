@@ -200,6 +200,18 @@ def _read_deployment(deployment_name: str) -> tuple[Any, str]:
         raise NotFound from None
 
 
+def _images(deployment: Any) -> list[str]:
+    """List the images of the containers of a deployment.
+
+    Args:
+        deployment: Deployment as returned by the Kubernetes client.
+
+    Returns:
+        The images, in the order of the containers.
+    """
+    return [container.image for container in deployment.spec.template.spec.containers]
+
+
 def _rollout_status(deployment: Any) -> str:
     """Derive the state of a rollout from a Deployment.
 
@@ -296,7 +308,7 @@ def getImage(deployment_name: str) -> Response:
                 and deployment.metadata.generation < generation
             ):
                 result["status"] = "rolling_out"
-        elif delivery.image != image:
+        elif delivery.image not in _images(deployment):
             result["status"] = state
             if detail:
                 result["detail"] = detail
@@ -330,8 +342,9 @@ def deleteDeployment(deployment_name: str) -> str:
 def updateDeployment(deployment_name: str) -> tuple[Response, int]:
     """Accept a notification of a new image and start the delivery.
 
-    Only the tag of the image can change. The delivery runs in the background;
-    `GET /deployment/{deployment-name}` reports its state.
+    Every container of the deployment whose image repository equals the
+    notification's changes, and only its tag. The delivery runs in the
+    background; `GET /deployment/{deployment-name}` reports its state.
 
     Args:
         deployment_name: Name of the deployment.
@@ -345,50 +358,215 @@ def updateDeployment(deployment_name: str) -> tuple[Response, int]:
         NotFound: If the deployment doesn't exist.
         Forbidden: If the sidecar has no right to read the deployment.
         BadRequest: If the tag is invalid.
-        ImageRepositoryMismatch: If the deployment uses another repository.
+        ImageRepositoryMismatch: If no container of the deployment uses the
+            repository.
         ImageRegistryUnsupported: If the image isn't on Docker Hub.
     """
     _check_token()
+    image_repo, image_tag = _notification()
+    deployment, _ = _read_deployment(deployment_name)
+    plan = _plan_update(deployment, image_repo, image_tag)
+    if plan is None:
+        raise ImageRepositoryMismatch
+    if not _is_on_docker_hub(image_repo):
+        raise ImageRegistryUnsupported
+    image, patch = plan
+    if not _start_delivery(deployment_name, image, image_repo, image_tag, patch):
+        return jsonify(
+            {"message": "Deployment already uses this image.", "image": image}
+        ), 200
+    return jsonify({"message": "Updating image in progress...", "image": image}), 202
+
+
+def updateDeployments() -> tuple[Response, int]:
+    """Accept a notification of a new image for all deployments that use it.
+
+    In every deployment that the sidecar manages, every container whose image
+    repository equals the notification's changes, and only its tag. The
+    sidecar manages the deployments named in the environment variable
+    `TARGET_DEPLOYMENTS` (comma-separated), or all in its namespace without
+    it; with `DEPLOYMENT_LABEL` (`key=value`, or `key` for any value), only
+    those with this label. Listed deployments that don't exist are skipped.
+    Each deployment gets its own delivery, whose state
+    `GET /deployment/{deployment-name}` reports.
+
+    Returns:
+        JSON response with the name and the (new) image of each deployment
+        that uses the repository, and status code 202, or 200 if all of them
+        already use the image: then nothing is rolled out.
+
+    Raises:
+        Unauthorized: If the token is missing or wrong.
+        BadRequest: If the tag is invalid.
+        ImageRegistryUnsupported: If the image isn't on Docker Hub.
+        NotFound: If no container of these deployments uses the repository.
+        Forbidden: If the sidecar has no right to read the deployments.
+    """
+    _check_token()
+    image_repo, image_tag = _notification()
+    if not _is_on_docker_hub(image_repo):
+        raise ImageRegistryUnsupported
+    plans = []
+    for deployment in _managed_deployments():
+        plan = _plan_update(deployment, image_repo, image_tag)
+        if plan is not None:
+            plans.append((deployment.metadata.name, *plan))
+    if not plans:
+        raise NotFound
+    started = False
+    for name, image, patch in plans:
+        started |= _start_delivery(name, image, image_repo, image_tag, patch)
+    message = (
+        "Updating images in progress..."
+        if started
+        else "Deployments already use this image."
+    )
+    deployments = [{"name": name, "image": image} for name, image, _ in plans]
+    return jsonify({"message": message, "deployments": deployments}), (
+        202 if started else 200
+    )
+
+
+def _notification() -> tuple[str, str]:
+    """Read the notification of the current request.
+
+    Returns:
+        Canonical repository and tag of the image.
+
+    Raises:
+        BadRequest: If the tag is invalid.
+    """
     # The API's validation ensures a JSON object with both fields
     body = cast(dict[str, str], request.json)
     image_tag = body["tag"]
     if not VALID_TAG.fullmatch(image_tag):
         raise BadRequest
-    _, old_image = _read_deployment(deployment_name)
+    return _parse_image(body["image_name"])[0], image_tag
 
-    image_repo = _parse_image(body["image_name"])[0]
-    old_repo, old_tag = _parse_image(old_image)
-    if old_repo != image_repo:
-        raise ImageRepositoryMismatch
-    if not _is_on_docker_hub(image_repo):
-        raise ImageRegistryUnsupported
 
-    # An image without a tag means `latest`, and one with a digest stays as it is
-    if (old_tag or "latest") == image_tag:
-        with _lock:
-            _deliveries.pop(deployment_name, None)
-        return jsonify(
-            {"message": "Deployment already uses this image.", "image": old_image}
-        ), 200
+def _managed_deployments() -> list[Any]:
+    """Read the deployments that the sidecar manages.
 
-    # Keeps the deployment's spelling of the repository, so only the tag changes
-    image = old_image.split("@")[0]
-    if old_tag is not None:
-        image = image.rsplit(":", 1)[0]
-    image = f"{image}:{image_tag}"
-    patch = [
-        {
-            "op": "replace",
-            "value": image,
-            "path": "/spec/template/spec/containers/0/image",
-        }
+    Returns:
+        The deployments named in `TARGET_DEPLOYMENTS`, or all in the
+        namespace without it, that carry the label in `DEPLOYMENT_LABEL`, if
+        set. Named deployments that don't exist are left out.
+
+    Raises:
+        Forbidden: If the sidecar has no right to read the deployments.
+        InternalServerError: For other errors of the Kubernetes API.
+    """
+    names = [
+        name.strip()
+        for name in os.getenv("TARGET_DEPLOYMENTS", "").split(",")
+        if name.strip()
+    ]
+    deployments: list[Any] = []
+    try:
+        if not names:
+            listed: Any = apiV1.list_namespaced_deployment(
+                namespace, _request_timeout=REQUEST_TIMEOUT
+            )
+            deployments = list(listed.items)
+        for name in names:
+            try:
+                deployments.append(
+                    apiV1.read_namespaced_deployment(
+                        name, namespace, _request_timeout=REQUEST_TIMEOUT
+                    )
+                )
+            except ApiException as exc:
+                if exc.status != 404:
+                    raise
+                logger.warning("Deployment %s not found; skipped.", name)
+    except ApiException as exc:
+        _raise_api_error(exc)
+    key, has_value, value = os.getenv("DEPLOYMENT_LABEL", "").partition("=")
+    key, value = key.strip(), value.strip()
+    if not key:
+        return deployments
+    return [
+        deployment
+        for deployment in deployments
+        if key in (deployment.metadata.labels or {})
+        and (not has_value or deployment.metadata.labels[key] == value)
     ]
 
+
+def _plan_update(
+    deployment: Any, image_repo: str, image_tag: str
+) -> tuple[str, list[dict[str, str]]] | None:
+    """Plan the update of the containers that use an image repository.
+
+    Each container keeps its spelling of the repository, so only the tag
+    changes. Containers that use the tag already (an image without a tag
+    means `latest`, and one with a digest stays as it is) aren't changed.
+
+    Args:
+        deployment: Deployment as returned by the Kubernetes client.
+        image_repo: Canonical repository of the image.
+        image_tag: Tag of the image.
+
+    Returns:
+        The image of the first container of the repository after the update,
+        and the JSON patch for the containers to change (empty if none needs
+        to); None if no container uses the repository.
+    """
+    image = None
+    patch = []
+    for index, container in enumerate(deployment.spec.template.spec.containers):
+        old_repo, old_tag = _parse_image(container.image)
+        if old_repo != image_repo:
+            continue
+        new_image = container.image
+        if (old_tag or "latest") != image_tag:
+            new_image = container.image.split("@")[0]
+            if old_tag is not None:
+                new_image = new_image.rsplit(":", 1)[0]
+            new_image = f"{new_image}:{image_tag}"
+            patch.append(
+                {
+                    "op": "replace",
+                    "value": new_image,
+                    "path": f"/spec/template/spec/containers/{index}/image",
+                }
+            )
+        if image is None:
+            image = new_image
+    if image is None:
+        return None
+    return image, patch
+
+
+def _start_delivery(
+    deployment_name: str,
+    image: str,
+    image_repo: str,
+    image_tag: str,
+    patch: list[dict[str, str]],
+) -> bool:
+    """Start the delivery of an image to a deployment, if it needs one.
+
+    Args:
+        deployment_name: Name of the deployment.
+        image: Image of the first container of the repository after the update.
+        image_repo: Canonical repository of the image.
+        image_tag: Tag of the image.
+        patch: JSON patch for the deployment; empty if it uses the image
+            already, which ends an earlier delivery that still waits.
+
+    Returns:
+        Whether a delivery started.
+    """
+    if not patch:
+        with _lock:
+            _deliveries.pop(deployment_name, None)
+        return False
     delivery = _Delivery(image=image)
     with _lock:
         _deliveries[deployment_name] = delivery
     _executor.submit(_deliver, delivery, image_repo, image_tag, deployment_name, patch)
-    return jsonify({"message": "Updating image in progress...", "image": image}), 202
+    return True
 
 
 def _is_current(delivery: _Delivery, deployment_name: str) -> bool:

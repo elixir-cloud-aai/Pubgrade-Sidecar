@@ -5,7 +5,9 @@
 # new tag and that the status reports it. The chart's minimal Role applies in
 # both namespaces; in the second one, the sidecar also runs as an arbitrary
 # user ID with group 0, as on OpenShift, and its target Deployment spells the
-# image with the `docker.io/` prefix.
+# image with the `docker.io/` prefix. In the first one, a notification for all
+# Deployments of an image repository also updates a Deployment with several
+# containers.
 #
 # Needs bash 4.4 or newer, Docker (privileged containers), kubectl, Helm, curl
 # and jq, and Internet access: the cluster pulls the target images from Docker
@@ -35,6 +37,8 @@ TARGET_REPO=nginxinc/nginx-unprivileged
 OLD_TAG=1.27-alpine
 NEW_TAG=1.28-alpine
 MISSING_TAG=no-such-tag-integration
+# Another image, which notifications for the target repository leave alone
+OTHER_IMAGE=busybox:1.37
 # As OpenShift assigns them: a high user ID, and group 0
 ARBITRARY_UID=1000770000
 NAMESPACES=(site-a site-b)
@@ -149,6 +153,17 @@ image_of() {
     -o jsonpath='{.spec.template.spec.containers[0].image}'
 }
 
+# The images of all containers of a Deployment, separated by spaces
+images_of() {
+  kubectl -n "$1" get deployment "$2" \
+    -o jsonpath='{.spec.template.spec.containers[*].image}'
+}
+
+# Whether a Deployment has the images, in the order of its containers
+has_images() {
+  [[ "$(images_of "$1" "$2")" == "$3" ]]
+}
+
 # Whether the cluster has registered its node
 node_registered() {
   [[ -n "$(kubectl get nodes --no-headers 2> /dev/null)" ]]
@@ -195,11 +210,24 @@ kubectl -n site-b create deployment tesk-api \
 # Not in `targetDeployments`, so outside the sidecar's Role
 kubectl -n site-a create deployment bystander \
   --image="${TARGET_REPO}:${OLD_TAG}" > /dev/null
+# Several containers, two of them of the target repository, in both
+# spellings; without replicas, as they would share a port. Only in site-a: in
+# site-b, the listed Deployment is missing
+jq --null-input --arg a "${TARGET_REPO}:${OLD_TAG}" \
+  --arg b "docker.io/${TARGET_REPO}:${OLD_TAG}" --arg c "${OTHER_IMAGE}" '{
+    apiVersion: "apps/v1", kind: "Deployment",
+    metadata: {name: "tesk-worker"},
+    spec: {replicas: 0, selector: {matchLabels: {app: "tesk-worker"}},
+      template: {metadata: {labels: {app: "tesk-worker"}},
+        spec: {containers: [{name: "a", image: $a}, {name: "b", image: $b},
+          {name: "c", image: $c}]}}}}' \
+  | kubectl -n site-a apply -f - > /dev/null
 
 echo "== install the chart"
 for ns in "${NAMESPACES[@]}"; do
   helm install sidecar "${ROOT}/deployment" --namespace "${ns}" \
     --set 'targetDeployments[0]=tesk-api' \
+    --set 'targetDeployments[1]=tesk-worker' \
     --set accessToken.existingSecret=sidecar-token \
     --set image.repository="${IMAGE_REPOSITORY}" \
     --set image.tag="${IMAGE_TAG}" \
@@ -289,6 +317,27 @@ expect "failure explained" \
   "|$(jq --raw-output .detail <<< "${out}")|"
 expect "Deployment unchanged after the failure" "|${TARGET_REPO}:${NEW_TAG}|" \
   "|$(image_of site-a tesk-api)|"
+
+echo "== all Deployments of the repository"
+expect "repository without Deployments" 404 \
+  "$(call site-a PUT /deployment "${TOKEN}" \
+    "{\"image_name\": \"other/image\", \"tag\": \"${NEW_TAG}\"}")"
+expect "notification accepted" 202 \
+  "$(call site-a PUT /deployment "${TOKEN}" \
+    "{\"image_name\": \"${TARGET_REPO}\", \"tag\": \"${NEW_TAG}\"}")"
+expect "Deployments that use the repository" '["tesk-api","tesk-worker"]' \
+  "$(jq --compact-output '[.deployments[].name]' "${WORK}/body")"
+want="${TARGET_REPO}:${NEW_TAG} docker.io/${TARGET_REPO}:${NEW_TAG} ${OTHER_IMAGE}"
+if retry 60 3 "the containers of tesk-worker" has_images site-a tesk-worker "${want}"; then
+  echo "ok    containers of the repository updated, others unchanged"
+else
+  echo "FAIL  containers of tesk-worker: want ${want}, got $(images_of site-a tesk-worker)"
+  FAILED=1
+fi
+expect "tesk-api keeps the image it has" "|${TARGET_REPO}:${NEW_TAG}|" \
+  "|$(image_of site-a tesk-api)|"
+expect "bystander still unchanged" "|${TARGET_REPO}:${OLD_TAG}|" \
+  "|$(image_of site-a bystander)|"
 
 if ((FAILED != 0)); then
   echo "Integration test failed"
