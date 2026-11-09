@@ -4,20 +4,14 @@
 # are reported: the findings that have a fix are uploaded to code scanning,
 # and a full report (findings without a fix included) is uploaded as the
 # workflow artifact `trivy-report-release-image` (JSON and table). Accepted
-# findings are listed in `.trivyignore.yaml`. Doesn't fail on findings until
-# the first release: until then, `latest` is the last image published from
-# `dev` before releases took it over, on the old FOCA 0.7 image, with many
-# fixable findings. Drop `fail: "false"` once the first release has
-# published `latest`, so that it fails on critical and high vulnerabilities
-# that have a fix, as CI, `release.yml` and cloud-registry do. Scheduled
-# runs use this workflow (with its pin of the shared action
-# `elixir-cloud-aai/.github/actions/scan-image`) and
-# `.trivyignore.yaml` as on the default branch, and file their findings
-# under it. The image is public, so no Docker Hub secrets are needed; its
-# organization is the variable `DOCKERHUB_ORG` (by default `elixircloud`, as
-# in `ci.yml` and `release.yml`; forks set it to the organization they
-# publish to). Until the first release, `latest` is the last image published
-# from `dev` before releases took it over.
+# findings are listed in `.trivyignore.yaml`. Fails on critical and high
+# vulnerabilities that have a fix, as CI, `release.yml` and cloud-registry
+# do. Scheduled runs use this workflow (with its pin of the shared action
+# `elixir-cloud-aai/.github/actions/scan-image`) and `.trivyignore.yaml` as
+# on the default branch, and file their findings under it. The image is
+# public, so no Docker Hub secrets are needed; its organization is the
+# variable `DOCKERHUB_ORG` (by default `elixircloud`, as in `ci.yml` and
+# `release.yml`; forks set it to the organization they publish to).
 
 name: Scan
 
@@ -49,4 +43,3 @@ jobs:
           image: docker.io/${{ vars.DOCKERHUB_ORG || 'elixircloud' }}/pubgrade-sidecar:latest
           category: release-image
           report: "true"
-          fail: "false"

@@ -43,8 +43,9 @@ default security constraints apply.
    ```
 
    The chart deploys the image of its `appVersion` unless `image.tag` is set
-   (see [Image](#image)). Until the first release, that version has no image
-   yet: set `image.tag` to `sha-<commit>` or `dev`.
+   (see [Image](#image)): on `dev` and in a release, the image of that
+   release (e.g., `0.2.0`). To follow development instead, set `image.tag` to
+   `sha-<commit>` or `dev`.
 
 `PUT /deployment` updates all `targetDeployments` that use the notified image
 repository (see [API](api.md)). To limit it to some of them, set
@@ -116,11 +117,10 @@ deployed `latest` by default. Now pushes to `dev` publish `dev` and
 `sha-<commit>`, `latest` moves only with releases, to the highest stable
 release, and dated tags are no longer published (existing ones stay as they
 are). The chart deploys the image of its `appVersion` unless `image.tag` is
-set. So `latest` stays at the last image published from `dev` before the
-change until the first release. If you pull `latest` (or deployed the chart
-with its default tag) to follow development, switch to `sha-<commit>` (or
-`dev`), or to a release once there is one; until the first release, set
-`image.tag` when you install the chart (see above).
+set. Since the first release, 0.2.0, `latest` is the image of the highest
+stable release. If you pulled `latest` (or deployed the chart with its
+default tag) to follow development, switch to `sha-<commit>` (or `dev`), or
+pin a release.
 
 ## Upgrading to version 3.2.0 of the API
 
