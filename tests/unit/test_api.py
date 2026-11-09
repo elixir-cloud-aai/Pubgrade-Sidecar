@@ -119,14 +119,13 @@ def test_delete_not_allowed(client: Any, path: str) -> None:
         client: Test client of the app.
         path: Path of the request.
     """
-    with (
-        patch("kubernetes.client.CoreV1Api.delete_namespaced_pod") as delete_pod,
-        patch("kubernetes.client.AppsV1Api.delete_namespaced_deployment") as delete,
-    ):
+    with patch("kubernetes.client.CoreV1Api.delete_namespaced_pod") as delete_pod:
         response = client.delete(path, headers=TOKEN)
     assert response.status_code == 405
+    assert response.content_type == "application/problem+json"
+    assert response.json["status"] == 405
+    assert "DELETE" not in response.headers["Allow"]
     delete_pod.assert_not_called()
-    delete.assert_not_called()
 
 
 def test_notification_accepted(client: Any) -> None:

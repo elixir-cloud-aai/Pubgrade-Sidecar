@@ -152,9 +152,6 @@ calls change as follows:
 - `registry-1.docker.io/` in `image_name` counts as Docker Hub, as
   `docker.io/` and `index.docker.io/` do.
 
-`DELETE /deployment/{deployment-name}` was unchanged in 3.2.0 (deleting the
-pod of that name, which the chart's Role refused); 4.0.0 removes it.
-
 ## Upgrading to version 3.1.0 of the API
 
 Version 3.1.0 of the API adds `PUT /deployment`, for all deployments that use
