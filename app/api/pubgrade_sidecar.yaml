@@ -425,18 +425,19 @@ components:
         type:
           type: string
           format: uri
-          description: URI of the problem type; for invalid requests, that of
+          description: URI of the problem type; only for requests that don't
+           match the API's schemas (400), that of
            [FOCA's invalid request](https://foca.readthedocs.io/en/latest/problems/invalid-request/).
           example: 'https://foca.readthedocs.io/en/latest/problems/invalid-request/'
         code:
           type: string
-          description: Stable code of the problem type, e.g.,
-           `invalid-request`.
+          description: Stable code of the problem type; only for requests that
+           don't match the API's schemas (400), `invalid-request`.
           example: 'invalid-request'
         errors:
           type: array
-          description: For invalid requests, the invalid fields, without their
-           values.
+          description: Only for requests that don't match the API's schemas
+           (400), the invalid fields, without their values.
           items:
             $ref: '#/components/schemas/FieldError'
       required:

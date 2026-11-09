@@ -192,6 +192,17 @@ def test_invalid_request_names_invalid_fields(client: Any) -> None:
     assert "123" not in response.get_data(as_text=True)
 
 
+def test_unknown_query_parameter_rejected(client: Any) -> None:
+    """Test that unknown query parameters are named as invalid fields."""
+    response = client.put(URL, headers=TOKEN, json=BODY, query_string={"zzz": "1"})
+    assert response.status_code == 400
+    assert response.json["detail"] == "Invalid fields: zzz (unknown-parameter)"
+    assert response.json["errors"] == [
+        {"detail": "Is not allowed.", "parameter": "zzz", "code": "unknown-parameter"}
+    ]
+    cast(MagicMock, controllers._executor).submit.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "method,path,code,detail",
     [

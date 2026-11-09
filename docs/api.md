@@ -127,8 +127,10 @@ e.g.:
 
 Requests that don't match the API's schemas (e.g., without the
 `X-Access-Token` header, or without `tag`) list their invalid fields in
-`errors`, by location and with a stable `code`, but never with their values,
-and `detail` names them, e.g.:
+`errors`, by location and with a stable `code`, but without their values
+(names of unknown parameters and body fields are echoed, though), and
+`detail` names them; only these responses have `type`, `code` and `errors`,
+e.g.:
 
 ```json
 {
@@ -146,10 +148,10 @@ and `detail` names them, e.g.:
 
 (see FOCA's
 [invalid request](https://foca.readthedocs.io/en/latest/problems/invalid-request/)
-for the codes). Other invalid requests, e.g., an invalid tag or an
-`image_name` with a tag or digest, get `"detail": "The request is invalid."`.
-Before, errors had `msg` and
-`status_code` (a string) instead (see
+for the codes). Other invalid requests, e.g., a body that isn't JSON or is
+`null`, an invalid tag or an `image_name` with a tag or digest, get
+`"detail": "The request is invalid."`, without `errors`. Before, errors had
+`msg` and `status_code` (a string) instead (see
 [Upgrading to version 3.0.0 of the API](deployment.md#upgrading-to-version-300-of-the-api)).
 
 The `GET` call above reports the state of the delivery. Since version 2.0.0 of
