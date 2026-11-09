@@ -125,8 +125,30 @@ e.g.:
 }
 ```
 
-For invalid requests, `detail` tells what is wrong, e.g.,
-`Missing header parameter 'X-Access-Token'`. Before, errors had `msg` and
+Requests that don't match the API's schemas (e.g., without the
+`X-Access-Token` header, or without `tag`) list their invalid fields in
+`errors`, by location and with a stable `code`, but never with their values,
+and `detail` names them, e.g.:
+
+```json
+{
+  "type": "https://foca.readthedocs.io/en/latest/problems/invalid-request/",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "Invalid fields: #/tag (required); X-Access-Token (required)",
+  "code": "invalid-request",
+  "errors": [
+    {"detail": "Is required.", "pointer": "#/tag", "code": "required"},
+    {"detail": "Is required.", "parameter": "X-Access-Token", "code": "required"}
+  ]
+}
+```
+
+(see FOCA's
+[invalid request](https://foca.readthedocs.io/en/latest/problems/invalid-request/)
+for the codes). Other invalid requests, e.g., an invalid tag or an
+`image_name` with a tag or digest, get `"detail": "The request is invalid."`.
+Before, errors had `msg` and
 `status_code` (a string) instead (see
 [Upgrading to version 3.0.0 of the API](deployment.md#upgrading-to-version-300-of-the-api)).
 
