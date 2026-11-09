@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.13.*"
 
 [[package]]
@@ -650,32 +650,6 @@ wheels = [
 ]
 
 [[package]]
-name = "griffe"
-version = "2.4.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "griffecli" },
-    { name = "griffelib" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/33/a4/be055b9ced02e39ac0ab85960e0ed3d8c6017c03e90965e77ff276684418/griffe-2.4.1.tar.gz", hash = "sha256:766123e26ec35b2ead63202e9e43ec309d876085d571b7df288256cd6fe4a3ef", size = 450805, upload-time = "2026-10-22T11:20:02.532Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/93/67a1814b4b13e9a5cc02510dbfa1d3937603140192a701c96d861b272611/griffe-2.4.1-py3-none-any.whl", hash = "sha256:ca58ccdb1d8590ad062fad837a875dd704f94acf7a0104795a098a991ceaf728", size = 5100, upload-time = "2026-10-22T11:19:58.365Z" },
-]
-
-[[package]]
-name = "griffecli"
-version = "2.4.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama" },
-    { name = "griffelib" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c9/8e/d3130e17ae27c900f8f76c96ceb2f02edfe0c7db0366b49e033f81ff81d7/griffecli-2.4.1.tar.gz", hash = "sha256:6db9acad984990b08c833ab5ec73d5a604e317b2290074d04c91ca9e52d35a7b", size = 61762, upload-time = "2026-10-22T11:20:01.054Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3f/dc/5cdbbbfd1a9e8c0e9b6b8b6e6d839e67f82cb138b77cf74856e5b80527de/griffecli-2.4.1-py3-none-any.whl", hash = "sha256:1678938e7b75a0aa34d3e408d550707a192f5297c3005aa0f92660648c30bc0a", size = 11774, upload-time = "2026-10-22T11:19:57.134Z" },
-]
-
-[[package]]
 name = "griffelib"
 version = "2.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -987,16 +961,16 @@ wheels = [
 
 [[package]]
 name = "mkdocstrings-python"
-version = "1.19.0"
+version = "2.0.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "griffe" },
+    { name = "griffelib" },
     { name = "mkdocs-autorefs" },
     { name = "mkdocstrings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/75/1c/3af8413919b0839b96a78f60e8bd0dfd26c844d3717eeb77f80b43f5be1c/mkdocstrings_python-1.19.0.tar.gz", hash = "sha256:917aac66cf121243c11db5b89f66b0ded6c53ec0de5318ff5e22424eb2f2e57c", size = 204010, upload-time = "2025-11-10T13:30:55.915Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/43/4783d5606de4f5e4bea10388c8741b0c40d03e7cb9527b94ad35966351f5/mkdocstrings_python-2.0.10.tar.gz", hash = "sha256:5e34ae56b2f20a57807ee479d603ddc5ec7cc6d2252c4c177754627ef2d3b833", size = 207682, upload-time = "2026-10-19T15:58:07.934Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/98/5c/2597cef67b6947b15c47f8dba967a0baf19fbdfdc86f6e4a8ba7af8b581a/mkdocstrings_python-1.19.0-py3-none-any.whl", hash = "sha256:395c1032af8f005234170575cc0c5d4d20980846623b623b35594281be4a3059", size = 143417, upload-time = "2025-11-10T13:30:54.164Z" },
+    { url = "https://files.pythonhosted.org/packages/be/1b/fc924a97a237adda47f15c1b0cc271639e6b181ab3f95500fbf060c79a69/mkdocstrings_python-2.0.10-py3-none-any.whl", hash = "sha256:4a3aaeebb25ba5ae57a8f9e75432fe4571984889602f2b2f7d672faa760e9062", size = 105538, upload-time = "2026-10-19T15:58:06.287Z" },
 ]
 
 [[package]]
@@ -1247,8 +1221,8 @@ docs = [
     { name = "mkdocs", specifier = ">=1.6.1,<2" },
     { name = "mkdocs-material", specifier = ">=9.6,<10" },
     { name = "mkdocstrings", specifier = ">=0.30,<2" },
-    { name = "mkdocstrings-python", specifier = ">=1.16,<2" },
-    { name = "pymdown-extensions", specifier = ">=10.16,<11" },
+    { name = "mkdocstrings-python", specifier = ">=1.16,<3" },
+    { name = "pymdown-extensions", specifier = ">=10.16,<13" },
 ]
 
 [[package]]
@@ -1337,15 +1311,15 @@ wheels = [
 
 [[package]]
 name = "pymdown-extensions"
-version = "10.21.3"
+version = "12.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "markdown" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/26/d1015444da4d952a1ca487a236b522eb979766f0295a0bd0c5fc089989a9/pymdown_extensions-10.21.3.tar.gz", hash = "sha256:72cfcf55f07aea0d4af2c4f11dd4e52466ddfb1bb819673146398e0bd3a77354", size = 854140, upload-time = "2026-05-13T12:57:32.267Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/fe/ac50ee24a80a1b344e643f6fb626063cc7041b978cd1dd9a7f9963ae1cd1/pymdown_extensions-12.3.tar.gz", hash = "sha256:a7f2a4e0bc60c6e6babfa7922cfb3b01cd640eb00fb208f3c582e12bae00ea67", size = 870532, upload-time = "2026-10-14T22:40:43.252Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/85/545a951eecc270fcd688288c600017e2050a1aacb56c711d208586d3e470/pymdown_extensions-10.21.3-py3-none-any.whl", hash = "sha256:d7a5d08014fc571e80ca21dd6f854e31f94c489800350564d55d15b3c41e76b6", size = 269002, upload-time = "2026-05-13T12:57:30.296Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/d0/758afe732c2da502c051b4d03ff88daa3c0fc1a1e671e6c5a6318177bab4/pymdown_extensions-12.3-py3-none-any.whl", hash = "sha256:345493a8e3497e24382902903a1c43a28e34a52f2b7571a1c9641429b820ca74", size = 277597, upload-time = "2026-10-14T22:40:41.543Z" },
 ]
 
 [[package]]
