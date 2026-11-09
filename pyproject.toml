@@ -1,6 +1,6 @@
 [project]
 name = "pubgrade-sidecar"
-version = "0.1.0"
+version = "0.2.0"
 description = "Updates the image tags of Kubernetes Deployments when Pubgrade notifies it"
 authors = [
     {name = "ELIXIR On-Cloud", email = "cloud-service@elixir-europe.org"},

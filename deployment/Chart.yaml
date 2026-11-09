@@ -8,4 +8,4 @@ type: application
 # release-prep pull request sets (see "Versioning and releases" in
 # `docs/development.md`). `appVersion` is the default image tag
 version: 0.2.0
-appVersion: "0.1.0"
+appVersion: "0.2.0"
