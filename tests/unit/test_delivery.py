@@ -6,9 +6,9 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from flask import Flask
+from foca.errors import BadRequest, Unauthorized
 from munch import DefaultMunch
 import pytest
-from werkzeug.exceptions import BadRequest, Unauthorized
 
 from pubgrade_sidecar import controllers
 from pubgrade_sidecar.errors.exceptions import ImageRepositoryMismatch

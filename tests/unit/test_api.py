@@ -12,6 +12,7 @@ import pytest
 
 from pubgrade_sidecar import app as sidecar_app
 from pubgrade_sidecar import controllers
+from pubgrade_sidecar.errors import exceptions
 
 READ = "kubernetes.client.AppsV1Api.read_namespaced_deployment"
 URL = "/deployment/tesk-api"
@@ -174,6 +175,51 @@ def test_errors_are_problem_details(
     assert response.mimetype == "application/problem+json"
     assert response.json["status"] == code
     assert response.json["title"]
+
+
+def test_invalid_request_names_invalid_fields(client: Any) -> None:
+    """Test that invalid requests name the invalid fields, not their values."""
+    body = {"image_name": "elixircloud/tesk-api", "tag": 123}
+    response = client.put(URL, headers={}, json=body)
+    assert response.status_code == 400
+    assert response.json["detail"] == (
+        "Invalid fields: #/tag (invalid-type); X-Access-Token (required)"
+    )
+    assert [error["code"] for error in response.json["errors"]] == [
+        "invalid-type",
+        "required",
+    ]
+    assert "123" not in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize(
+    "method,path,code,detail",
+    [
+        ("GET", "/unknown", 404, "The requested resource wasn't found."),
+        ("POST", URL, 405, "The method is not allowed."),
+    ],
+)
+def test_routing_errors_mapped(
+    client: Any, method: str, path: str, code: int, detail: str
+) -> None:
+    """Test that Flask's routing errors get the mapped problem details.
+
+    Flask raises Werkzeug's classes, which the map covers through those of
+    `foca.errors` that derive from them.
+    """
+    response = client.open(path, method=method, headers=TOKEN)
+    assert response.status_code == code
+    assert response.json["status"] == code
+    assert response.json["detail"] == detail
+
+
+def test_exception_map_without_werkzeug_classes() -> None:
+    """Test that the exception map has no Werkzeug classes.
+
+    FOCA logs them as deprecated; they stop working without Flask.
+    """
+    modules = {cls.__module__ for cls in exceptions.exceptions}
+    assert not any(module.startswith("werkzeug") for module in modules)
 
 
 def test_request_body_size_limited(client: Any) -> None:
