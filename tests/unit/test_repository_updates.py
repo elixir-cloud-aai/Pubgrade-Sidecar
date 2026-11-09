@@ -395,6 +395,7 @@ def test_one_deployment_other_registry(
 ) -> None:
     """Test that images of other registries are rolled out too."""
     image = "harbor.example.org:8443/project/app"
+    monkeypatch.setenv("TARGET_DEPLOYMENTS", "harbor-app")
     monkeypatch.setitem(
         DEPLOYMENTS, "harbor-app", deployment("harbor-app", [f"{image}:1.0"])
     )
