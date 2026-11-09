@@ -219,3 +219,88 @@ def test_notification_for_all_deployments(
         assert client.put("/deployment", headers=TOKEN, json={}).status_code == 400
         other = {**BODY, "image_name": "elixircloud/other"}
         assert client.put("/deployment", headers=TOKEN, json=other).status_code == 404
+
+
+@pytest.mark.parametrize(
+    "image_name",
+    [
+        "elixircloud/tesk-api:1.2.0",
+        "elixircloud/tesk-api@sha256:" + "0" * 64,
+        "registry:5000/org/app:1.2.0",
+    ],
+)
+@pytest.mark.parametrize("url", [URL, "/deployment"])
+def test_notification_with_tag_in_name_rejected(
+    client: Any, image_name: str, url: str
+) -> None:
+    """Test that an image name with a tag or digest gets a 400."""
+    body = {"image_name": image_name, "tag": "1.2.0"}
+    with patch(READ) as read:
+        assert client.put(url, headers=TOKEN, json=body).status_code == 400
+    read.assert_not_called()
+    cast(MagicMock, controllers._executor).submit.assert_not_called()
+
+
+def test_notification_with_registry_port_accepted(client: Any) -> None:
+    """Test that the port of a registry isn't taken for a tag."""
+    image = "registry:5000/org/app"
+    with patch(READ, return_value=deployment(f"{image}:1.0")):
+        response = client.put(
+            URL, headers=TOKEN, json={"image_name": image, "tag": "2.0"}
+        )
+    assert response.status_code == 202
+    assert response.json["image"] == f"{image}:2.0"
+
+
+@pytest.mark.parametrize("method,body", [("get", None), ("put", BODY)])
+def test_other_deployments_refused(
+    client: Any, monkeypatch: pytest.MonkeyPatch, method: str, body: Any
+) -> None:
+    """Test that only the deployments in `TARGET_DEPLOYMENTS` can be used."""
+    monkeypatch.setenv("TARGET_DEPLOYMENTS", "tesk-api, tesk-worker")
+    call = getattr(client, method)
+    with patch(READ, return_value=deployment("elixircloud/tesk-api:1.1.0")) as read:
+        response = call("/deployment/other", headers=TOKEN, json=body)
+        assert response.status_code == 403
+        read.assert_not_called()
+        response = call("/deployment/tesk-worker", headers=TOKEN, json=body)
+        assert response.status_code in (200, 202)
+        read.assert_called_once()
+
+
+def test_list_limited_to_targets(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that `GET /deployment` lists the deployments in `TARGET_DEPLOYMENTS`.
+
+    They are read one by one (the chart's Role can't list deployments), and
+    those that don't exist are left out.
+    """
+    monkeypatch.setenv("TARGET_DEPLOYMENTS", "tesk-api,missing")
+
+    def read(name: str, namespace: str, **kwargs: Any) -> DefaultMunch:
+        """Read a deployment; `missing` doesn't exist.
+
+        Args:
+            name: Name of the deployment.
+            namespace: Namespace of the deployment.
+            **kwargs: Further arguments of the call.
+
+        Returns:
+            The deployment.
+
+        Raises:
+            ApiException: For `missing`.
+        """
+        if name == "missing":
+            raise ApiException(status=404)
+        found = deployment("elixircloud/tesk-api:1.1.0")
+        found.metadata.name = name
+        return found
+
+    with (
+        patch(READ, side_effect=read),
+        patch("kubernetes.client.AppsV1Api.list_namespaced_deployment") as listed,
+    ):
+        response = client.get("/deployment", headers=TOKEN)
+    assert response.status_code == 200
+    assert response.json == ["tesk-api"]
+    listed.assert_not_called()

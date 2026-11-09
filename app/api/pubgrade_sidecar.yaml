@@ -1,7 +1,7 @@
 openapi: 3.0.2
 info:
   title: Sidecar service to update deployment on k8s-cluster
-  version: 3.1.0
+  version: 3.2.0
   description: >
     The project is to implement a microservice which would be co-deployed along
     with pubgrade in Kubernetes cluster at deployments to listen for update
@@ -12,7 +12,10 @@ info:
 paths:
   /deployment:
     get:
-      summary: 'List available deployments.'
+      summary: 'List the deployments that the sidecar manages.'
+      description: 'The deployments that `PUT /deployment` updates:
+       those in `TARGET_DEPLOYMENTS` that exist, or all in the namespace
+       without it; with `DEPLOYMENT_LABEL`, only those with that label.'
       operationId: getDeployment
       tags:
         - deployment
@@ -25,14 +28,13 @@ paths:
           description: Secret used to identify source of request.
       responses:
         '200':
-          description: 'List of available deployments'
+          description: 'Names of the deployments'
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Deployment'
-                additionalProperties: false
+                  type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -296,8 +298,8 @@ components:
       properties:
             image_name:
                 type: string
-                description: Name of image to be used for deployment
-                 repository.
+                description: Image repository, without a tag or digest
+                 (which get a 400), e.g., `elixircloud/tesk-api`.
                 example: akash7778/broker
             tag:
                 type: string

@@ -63,7 +63,8 @@ apiV1 = client.AppsV1Api()
 MAX_RETRY = 3
 RETRY_INTERVAL = 30
 REQUEST_TIMEOUT = 10
-DOCKER_HUB_PREFIXES = ("docker.io/", "index.docker.io/")
+# Hosts of Docker Hub in image names, as Pubgrade counts them
+DOCKER_HUB_PREFIXES = ("docker.io/", "index.docker.io/", "registry-1.docker.io/")
 # The registry that serves Docker Hub's images, and the keys of its
 # credentials in Docker's configuration files
 DOCKER_HUB_REGISTRY = "registry-1.docker.io"
@@ -280,27 +281,46 @@ def _rollout_status(deployment: Any) -> str:
 
 
 def getDeployment() -> list[str]:
-    """List the deployments in the namespace.
+    """List the deployments that the sidecar manages.
 
     Returns:
-        Names of the deployments.
+        Names of the deployments, as `PUT /deployment` selects them (see
+        `_managed_deployments`).
 
     Raises:
         Unauthorized: If the token is missing or wrong.
-        Forbidden: If the sidecar has no right to list the deployments.
+        Forbidden: If the sidecar has no right to read the deployments.
     """
     _check_token()
-    pod_list: Any
-    try:
-        pod_list = apiV1.list_namespaced_deployment(
-            namespace, _request_timeout=REQUEST_TIMEOUT
-        )
-    except ApiException as exc:
-        _raise_api_error(exc)
-    pods = []
-    for pod in pod_list.items:
-        pods.append(pod.metadata.name)
-    return pods
+    return [deployment.metadata.name for deployment in _managed_deployments()]
+
+
+def _target_names() -> list[str]:
+    """Read the names of the deployments that the sidecar may use.
+
+    Returns:
+        The names in `TARGET_DEPLOYMENTS` (comma-separated); empty if it isn't
+        set, for all deployments in the namespace.
+    """
+    return [
+        name.strip()
+        for name in os.getenv("TARGET_DEPLOYMENTS", "").split(",")
+        if name.strip()
+    ]
+
+
+def _check_target(deployment_name: str) -> None:
+    """Check that the sidecar may use a deployment.
+
+    Args:
+        deployment_name: Name of the deployment.
+
+    Raises:
+        Forbidden: If `TARGET_DEPLOYMENTS` is set and doesn't name it.
+    """
+    names = _target_names()
+    if names and deployment_name not in names:
+        raise Forbidden
 
 
 def getImage(deployment_name: str) -> Response:
@@ -321,9 +341,11 @@ def getImage(deployment_name: str) -> Response:
     Raises:
         Unauthorized: If the token is missing or wrong.
         NotFound: If the deployment doesn't exist.
-        Forbidden: If the sidecar has no right to read the deployment.
+        Forbidden: If `TARGET_DEPLOYMENTS` doesn't name the deployment, or the
+            sidecar has no right to read it.
     """
     _check_token()
+    _check_target(deployment_name)
     with _lock:
         # Copies, as deliveries change in the background
         deliveries = [
@@ -408,12 +430,15 @@ def updateDeployment(deployment_name: str) -> tuple[Response, int]:
     Raises:
         Unauthorized: If the token is missing or wrong.
         NotFound: If the deployment doesn't exist.
-        Forbidden: If the sidecar has no right to read the deployment.
-        BadRequest: If the tag is invalid.
+        Forbidden: If `TARGET_DEPLOYMENTS` doesn't name the deployment, or the
+            sidecar has no right to read it.
+        BadRequest: If the tag is invalid, or the image name has a tag or a
+            digest.
         ImageRepositoryMismatch: If no container of the deployment uses the
             repository.
     """
     _check_token()
+    _check_target(deployment_name)
     image_repo, image_tag = _notification()
     deployment, _ = _read_deployment(deployment_name)
     plan = _plan_update(deployment, image_repo, image_tag)
@@ -447,7 +472,8 @@ def updateDeployments() -> tuple[Response, int]:
 
     Raises:
         Unauthorized: If the token is missing or wrong.
-        BadRequest: If the tag is invalid.
+        BadRequest: If the tag is invalid, or the image name has a tag or a
+            digest.
         NotFound: If no container of these deployments uses the repository.
         Forbidden: If the sidecar has no right to read the deployments.
     """
@@ -486,14 +512,17 @@ def _notification() -> tuple[str, str]:
         Canonical repository and tag of the image.
 
     Raises:
-        BadRequest: If the tag is invalid.
+        BadRequest: If the tag is invalid, or the image name has a tag or a
+            digest (which would be dropped).
     """
     # The API's validation ensures a JSON object with both fields
     body = cast(dict[str, str], request.json)
-    image_tag = body["tag"]
+    image_name, image_tag = body["image_name"], body["tag"]
     if not VALID_TAG.fullmatch(image_tag):
         raise BadRequest
-    return _parse_image(body["image_name"])[0], image_tag
+    if "@" in image_name or ":" in image_name.rsplit("/", 1)[-1]:
+        raise BadRequest
+    return _parse_image(image_name)[0], image_tag
 
 
 def _managed_deployments() -> list[Any]:
@@ -508,11 +537,7 @@ def _managed_deployments() -> list[Any]:
         Forbidden: If the sidecar has no right to read the deployments.
         InternalServerError: For other errors of the Kubernetes API.
     """
-    names = [
-        name.strip()
-        for name in os.getenv("TARGET_DEPLOYMENTS", "").split(",")
-        if name.strip()
-    ]
+    names = _target_names()
     deployments: list[Any] = []
     try:
         if not names:

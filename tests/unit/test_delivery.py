@@ -141,6 +141,10 @@ def status(app: Flask) -> dict[str, Any]:
         ("docker.io/library/nginx:1", ("library/nginx", "1")),
         ("docker.io/elixircloud/tesk-api:1", ("elixircloud/tesk-api", "1")),
         ("index.docker.io/elixircloud/tesk-api:1", ("elixircloud/tesk-api", "1")),
+        (
+            "registry-1.docker.io/elixircloud/tesk-api:1",
+            ("elixircloud/tesk-api", "1"),
+        ),
         ("quay.io/org/app:1", ("quay.io/org/app", "1")),
         ("registry:5000/org/app:1", ("registry:5000/org/app", "1")),
         ("registry:5000/org/app", ("registry:5000/org/app", None)),

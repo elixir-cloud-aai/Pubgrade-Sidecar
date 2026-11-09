@@ -12,7 +12,9 @@ The examples call the sidecar through its Route or Ingress, with TLS
 without a Route or Ingress, call its Service over plain HTTP instead, e.g.,
 `http://pubgrade-sidecar.{namespace}:8080`.
 
-Get the deployments in the namespace:
+Get the names of the deployments that the sidecar manages (those that
+`PUT /deployment` updates, see [Deployment](deployment.md)); the calls for one
+deployment answer 403 for others:
 
 ```bash
 curl --location --request GET 'https://{sidecar-host}/deployment' \
