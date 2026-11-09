@@ -112,9 +112,8 @@ tag) and `version` (the SemVer form, e.g., `1.2.3-rc1` for `1.2.3rc1`), and
 the version in `CITATION.cff`. Until 1.0.0, all releases are GitHub
 pre-releases.
 
-For the first release, the chart's `version` (0.2.0, from before the
-release workflow) and the app's version (0.1.0) differ; the release-prep pull
-request sets both, e.g., to 0.2.0.
+The first release is 0.2.0, the chart's `version` from before the release
+workflow: its release-prep pull request moved the app from 0.1.0 to it.
 
 1. Release-prep pull request to `dev`: set the version in `pyproject.toml`,
    `deployment/Chart.yaml` (`version` and `appVersion`) and `CITATION.cff`
