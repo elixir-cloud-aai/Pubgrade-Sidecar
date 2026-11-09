@@ -202,7 +202,7 @@ paths:
         default:
           $ref: '#/components/responses/Error'
     delete:
-      summary: 'Delete deployment'
+      summary: 'Delete the pod of the given name (not a deployment)'
       operationId: deleteDeployment
       tags:
         - deployment
@@ -218,15 +218,15 @@ paths:
           required: true
           schema:
             type: string
-          description: Name of the deployment to be deleted.
+          description: Name of the pod to be deleted.
       responses:
         '200':
-          description: 'The deployment is successfully deleted'
+          description: 'The pod is deleted'
           content:
             application/json:
               schema:
                 type: string
-                description: 'The deployment is successfully deleted'
+                description: 'Confirmation, with the name of the pod'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':

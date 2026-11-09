@@ -123,7 +123,7 @@ with its default tag) to follow development, switch to `sha-<commit>` (or
 Version 3.2.0 of the API applies `TARGET_DEPLOYMENTS` (the chart's
 `targetDeployments`) to `GET /deployment` and to `GET` and
 `PUT /deployment/{deployment-name}`, not only to `PUT /deployment`. These
-calls now refuse what they allowed before:
+calls change as follows:
 
 - `GET /deployment` lists the deployments that `PUT /deployment` updates:
   those in `TARGET_DEPLOYMENTS` that exist (read one by one, so the chart's
