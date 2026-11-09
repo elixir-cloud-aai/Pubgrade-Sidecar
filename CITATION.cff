@@ -22,6 +22,13 @@ authors:
       of Bioinformatics, Lausanne, Switzerland
   - given-names: Akash
     family-names: Saini
+doi: 10.5281/zenodo.24087986
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.24087986
+    description: >-
+      Concept DOI of all versions on Zenodo; it always resolves to the latest
+      version
 repository-code: "https://github.com/elixir-cloud-aai/Pubgrade-Sidecar"
 keywords:
   - Pubgrade
