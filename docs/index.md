@@ -26,7 +26,10 @@ OpenShift.
 
 ## Citation
 
-If you use Pubgrade-Sidecar, please cite it with the metadata in
+If you use Pubgrade-Sidecar, please cite it with its DOI
+[10.5281/zenodo.24087986](https://doi.org/10.5281/zenodo.24087986), which
+always resolves to the latest version on [Zenodo](https://zenodo.org/); the
+Zenodo record lists the DOI of each version, too. The citation metadata is in
 [`CITATION.cff`](https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/blob/dev/CITATION.cff):
 on GitHub, "Cite this repository" in the sidebar of the repository formats it
 as APA or BibTeX.
