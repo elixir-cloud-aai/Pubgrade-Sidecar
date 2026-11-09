@@ -51,7 +51,8 @@ paths:
       description: 'In every deployment that the sidecar manages
        (`TARGET_DEPLOYMENTS`, or all in its namespace; only those with the
        label `DEPLOYMENT_LABEL`, if set), every container whose image
-       repository equals `image_name` gets the new tag.'
+       repository equals `image_name` gets the new tag. An `image_name` with
+       a tag or digest gets a 400.'
       operationId: updateDeployments
       tags:
         - deployment
@@ -103,6 +104,8 @@ paths:
   /deployment/{deployment-name}:
     get:
       summary: 'Retrieve container image of the specified deployement'
+      description: 'A deployment that `TARGET_DEPLOYMENTS` (if set) doesn''t
+       name gets a 403.'
       operationId: getImage
       tags:
         - deployment
@@ -141,6 +144,8 @@ paths:
     put:
       summary: 'Roll out a new image tag to the containers of a deployment
        that use its repository'
+      description: 'A deployment that `TARGET_DEPLOYMENTS` (if set) doesn''t
+       name gets a 403, and an `image_name` with a tag or digest a 400.'
       operationId: updateDeployment
       tags:
         - deployment

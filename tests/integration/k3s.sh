@@ -273,15 +273,16 @@ for ns in "${NAMESPACES[@]}"; do
   # (site-b)
   expect "Deployment outside the targets refused" 403 \
     "$(notify "${ns}" bystander "${TARGET_REPO}" "${NEW_TAG}")"
-  # Read one by one, which the Role allows; without the bystander
-  expect "targets listed" 200 "$(call "${ns}" GET /deployment "${TOKEN}")"
-  listed="$(jq --compact-output --sort-keys . "${WORK}/body" 2> /dev/null \
-    || cat "${WORK}/body")"
-  expect "list names the target" '"tesk-api"' "${listed}"
-  if [[ "${listed}" == *bystander* ]]; then
-    echo "FAIL  list names the bystander: ${listed}"
-    FAILED=1
+  # Read one by one, which the Role allows: the targets that exist (tesk-worker
+  # only in site-a), without the bystander
+  want='["tesk-api"]'
+  if [[ "${ns}" == site-a ]]; then
+    want='["tesk-api","tesk-worker"]'
   fi
+  expect "targets listed" 200 "$(call "${ns}" GET /deployment "${TOKEN}")"
+  expect "list of the targets" "|${want}|" \
+    "|$(jq --compact-output sort "${WORK}/body" 2> /dev/null \
+      || cat "${WORK}/body")|"
   expect "notification accepted" 202 \
     "$(notify "${ns}" tesk-api "${TARGET_REPO}" "${NEW_TAG}")"
 done

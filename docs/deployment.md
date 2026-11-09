@@ -49,8 +49,8 @@ default security constraints apply.
 `PUT /deployment` updates all `targetDeployments` that use the notified image
 repository (see [API](api.md)). To limit it to some of them, set
 `deploymentLabel` to a label they have, `key=value`, or `key` for any value (a
-value without a key, e.g., `=api`, matches no deployment);
-`PUT /deployment/{name}` isn't limited by it. Outside the chart, the sidecar
+value without a key, e.g., `=api`, matches no deployment); `GET` and
+`PUT /deployment/{name}` aren't limited by it. Outside the chart, the sidecar
 takes these settings from the environment variables `TARGET_DEPLOYMENTS`
 (comma-separated names; without it, all deployments in the namespace, which
 needs the right to list them) and `DEPLOYMENT_LABEL`. `GET /deployment` lists
@@ -121,8 +121,9 @@ with its default tag) to follow development, switch to `sha-<commit>` (or
 ## Upgrading to version 3.2.0 of the API
 
 Version 3.2.0 of the API applies `TARGET_DEPLOYMENTS` (the chart's
-`targetDeployments`) to all calls for deployments, not only to
-`PUT /deployment`:
+`targetDeployments`) to `GET /deployment` and to `GET` and
+`PUT /deployment/{deployment-name}`, not only to `PUT /deployment`. These
+calls now refuse what they allowed before:
 
 - `GET /deployment` lists the deployments that `PUT /deployment` updates:
   those in `TARGET_DEPLOYMENTS` that exist (read one by one, so the chart's
@@ -139,7 +140,9 @@ Version 3.2.0 of the API applies `TARGET_DEPLOYMENTS` (the chart's
 - `registry-1.docker.io/` in `image_name` counts as Docker Hub, as
   `docker.io/` and `index.docker.io/` do.
 
-`DELETE /deployment/{deployment-name}` is unchanged.
+`DELETE /deployment/{deployment-name}` is unchanged: it deletes the pod of
+that name, not a deployment, so `TARGET_DEPLOYMENTS` doesn't apply to it, and
+the chart's Role refuses it.
 
 ## Upgrading to version 3.1.0 of the API
 

@@ -169,6 +169,18 @@ def _parse_image(image: str) -> tuple[str, str | None]:
     return repository, tag
 
 
+def _has_tag_or_digest(image: str) -> bool:
+    """Tell whether an image names a tag or a digest, as `_parse_image` reads it.
+
+    Args:
+        image: Image, e.g., `registry:5000/org/app` (a port is no tag).
+
+    Returns:
+        Whether it has a digest (`@`), or a tag (`:` in its last part).
+    """
+    return "@" in image or _parse_image(image)[1] is not None
+
+
 def _is_on_docker_hub(repository: str) -> bool:
     """Tell whether a canonical repository is on Docker Hub.
 
@@ -520,7 +532,7 @@ def _notification() -> tuple[str, str]:
     image_name, image_tag = body["image_name"], body["tag"]
     if not VALID_TAG.fullmatch(image_tag):
         raise BadRequest
-    if "@" in image_name or ":" in image_name.rsplit("/", 1)[-1]:
+    if _has_tag_or_digest(image_name):
         raise BadRequest
     return _parse_image(image_name)[0], image_tag
 

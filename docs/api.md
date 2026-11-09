@@ -43,7 +43,9 @@ images, or several deployments of one image: subscribe it once per image
 repository. In every deployment the sidecar manages (`targetDeployments` of
 the chart; with `deploymentLabel`, only those with that label, see
 [Deployment](deployment.md)), every container whose image repository equals
-`image_name` gets the new tag. Other containers stay as they are. With 202,
+`image_name` gets the new tag. `image_name` is the repository without a tag or
+digest (a registry's port, e.g., `registry:5000/org/app`, is fine); with
+one, the call gets a 400. Other containers stay as they are. With 202,
 the response lists the deployments that roll out, with the requested image of
 their first container of the repository (with 200, all deployments that use
 it, with the image they use):
@@ -93,9 +95,11 @@ again, doesn't lead to a rollout.
 Status  Meaning
 200     The deployment already uses this image; nothing happens
 202     Accepted
-400     Invalid request, e.g., no `X-Access-Token` header or an invalid tag
+400     Invalid request, e.g., no `X-Access-Token` header, an invalid tag, or
+        an `image_name` with a tag or digest
 401     Wrong token, or no token configured in the sidecar
-403     The sidecar may not access this deployment
+403     The sidecar may not access this deployment: `TARGET_DEPLOYMENTS`
+        (`targetDeployments`) doesn't name it, or its Role doesn't allow it
 404     Deployment not found; for `PUT /deployment`: no container uses the
         repository
 405     Method not allowed
