@@ -101,7 +101,7 @@ Status  Meaning
 403     The sidecar may not access this deployment: for `GET` and
         `PUT /deployment/{deployment-name}`, `TARGET_DEPLOYMENTS`
         (`targetDeployments`) doesn't name it; for any call, its Role doesn't
-        allow it (e.g., `DELETE` with the chart's Role)
+        allow it
 404     Deployment not found; for `PUT /deployment`: no container uses the
         repository
 405     Method not allowed
