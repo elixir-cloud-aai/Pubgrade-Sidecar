@@ -98,8 +98,10 @@ Status  Meaning
 400     Invalid request, e.g., no `X-Access-Token` header, an invalid tag, or
         an `image_name` with a tag or digest
 401     Wrong token, or no token configured in the sidecar
-403     The sidecar may not access this deployment: `TARGET_DEPLOYMENTS`
-        (`targetDeployments`) doesn't name it, or its Role doesn't allow it
+403     The sidecar may not access this deployment: for `GET` and
+        `PUT /deployment/{deployment-name}`, `TARGET_DEPLOYMENTS`
+        (`targetDeployments`) doesn't name it; for any call, its Role doesn't
+        allow it (e.g., `DELETE` with the chart's Role)
 404     Deployment not found; for `PUT /deployment`: no container uses the
         repository
 405     Method not allowed

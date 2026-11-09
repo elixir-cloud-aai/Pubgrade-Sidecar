@@ -56,7 +56,11 @@ takes these settings from the environment variables `TARGET_DEPLOYMENTS`
 needs the right to list them) and `DEPLOYMENT_LABEL`. `GET /deployment` lists
 the same deployments as `PUT /deployment` updates, and the calls for one
 deployment (`GET` and `PUT /deployment/{name}`) answer 403 for a deployment
-that `TARGET_DEPLOYMENTS` doesn't name.
+that `TARGET_DEPLOYMENTS` doesn't name. The deployments of
+`TARGET_DEPLOYMENTS` are read one after the other (each within 10 seconds),
+so with many of them, or a slow Kubernetes API, `GET /deployment` and
+`PUT /deployment` take longer than a caller such as Pubgrade (10 seconds by
+default) may wait: keep the list to what the sidecar has to update.
 
 The sidecar gets `get` and `patch` on the `targetDeployments` and nothing else.
 So with the chart, `DELETE /deployment/{name}` is refused: it would need

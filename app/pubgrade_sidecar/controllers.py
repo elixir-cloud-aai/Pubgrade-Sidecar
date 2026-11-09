@@ -311,14 +311,12 @@ def _target_names() -> list[str]:
     """Read the names of the deployments that the sidecar may use.
 
     Returns:
-        The names in `TARGET_DEPLOYMENTS` (comma-separated); empty if it isn't
-        set, for all deployments in the namespace.
+        The names in `TARGET_DEPLOYMENTS` (comma-separated), each once, in
+        their order; empty if it isn't set, for all deployments in the
+        namespace.
     """
-    return [
-        name.strip()
-        for name in os.getenv("TARGET_DEPLOYMENTS", "").split(",")
-        if name.strip()
-    ]
+    names = (name.strip() for name in os.getenv("TARGET_DEPLOYMENTS", "").split(","))
+    return list(dict.fromkeys(name for name in names if name))
 
 
 def _check_target(deployment_name: str) -> None:

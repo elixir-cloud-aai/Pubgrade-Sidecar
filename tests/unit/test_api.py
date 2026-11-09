@@ -252,9 +252,9 @@ def test_notification_with_registry_port_accepted(client: Any) -> None:
     assert response.json["image"] == f"{image}:2.0"
 
 
-@pytest.mark.parametrize("method,body", [("get", None), ("put", BODY)])
+@pytest.mark.parametrize("method,body,code", [("get", None, 200), ("put", BODY, 202)])
 def test_other_deployments_refused(
-    client: Any, monkeypatch: pytest.MonkeyPatch, method: str, body: Any
+    client: Any, monkeypatch: pytest.MonkeyPatch, method: str, body: Any, code: int
 ) -> None:
     """Test that only the deployments in `TARGET_DEPLOYMENTS` can be used."""
     monkeypatch.setenv("TARGET_DEPLOYMENTS", "tesk-api, tesk-worker")
@@ -264,7 +264,7 @@ def test_other_deployments_refused(
         assert response.status_code == 403
         read.assert_not_called()
         response = call("/deployment/tesk-worker", headers=TOKEN, json=body)
-        assert response.status_code in (200, 202)
+        assert response.status_code == code
         read.assert_called_once()
 
 
@@ -272,9 +272,10 @@ def test_list_limited_to_targets(client: Any, monkeypatch: pytest.MonkeyPatch) -
     """Test that `GET /deployment` lists the deployments in `TARGET_DEPLOYMENTS`.
 
     They are read one by one (the chart's Role can't list deployments), and
-    those that don't exist are left out.
+    those that don't exist are left out; names given twice are read once.
     """
-    monkeypatch.setenv("TARGET_DEPLOYMENTS", "tesk-api,missing")
+    monkeypatch.setenv("TARGET_DEPLOYMENTS", "tesk-api,missing, tesk-api")
+    monkeypatch.delenv("DEPLOYMENT_LABEL", raising=False)
 
     def read(name: str, namespace: str, **kwargs: Any) -> DefaultMunch:
         """Read a deployment; `missing` doesn't exist.
