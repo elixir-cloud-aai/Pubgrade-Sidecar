@@ -102,17 +102,31 @@ def test_kubernetes_errors(client: Any, status: int, code: int) -> None:
 
 
 @pytest.mark.parametrize("status,code", [(404, 404), (403, 403), (503, 500)])
-def test_kubernetes_errors_of_list_and_delete(
-    client: Any, status: int, code: int
-) -> None:
-    """Test that the other calls treat Kubernetes errors the same way."""
+def test_kubernetes_errors_of_list(client: Any, status: int, code: int) -> None:
+    """Test that listing treats Kubernetes errors the same way."""
     error = ApiException(status=status)
     with patch(
         "kubernetes.client.AppsV1Api.list_namespaced_deployment", side_effect=error
     ):
         assert client.get("/deployment", headers=TOKEN).status_code == code
-    with patch("kubernetes.client.CoreV1Api.delete_namespaced_pod", side_effect=error):
-        assert client.delete(URL, headers=TOKEN).status_code == code
+
+
+@pytest.mark.parametrize("path", [URL, "/deployment"])
+def test_delete_not_allowed(client: Any, path: str) -> None:
+    """Test that `DELETE` (removed in API 4.0.0) deletes nothing and gets a 405.
+
+    Args:
+        client: Test client of the app.
+        path: Path of the request.
+    """
+    with (
+        patch("kubernetes.client.CoreV1Api.delete_namespaced_pod") as delete_pod,
+        patch("kubernetes.client.AppsV1Api.delete_namespaced_deployment") as delete,
+    ):
+        response = client.delete(path, headers=TOKEN)
+    assert response.status_code == 405
+    delete_pod.assert_not_called()
+    delete.assert_not_called()
 
 
 def test_notification_accepted(client: Any) -> None:
