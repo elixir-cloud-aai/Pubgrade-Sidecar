@@ -64,8 +64,6 @@ so with many of them, or a slow Kubernetes API, `GET /deployment` and
 default) may wait: keep the list to what the sidecar has to update.
 
 The sidecar gets `get` and `patch` on the `targetDeployments` and nothing else.
-So with the chart, `DELETE /deployment/{name}` is refused: it would need
-further rights, which you can add with a Role of your own.
 Kubernetes can't limit `patch` to one field, so these rights cover the whole of
 each listed Deployment, although the sidecar's API only changes the image tag.
 List only what the sidecar has to update, and add an admission policy in your
@@ -122,6 +120,16 @@ stable release. If you pulled `latest` (or deployed the chart with its
 default tag) to follow development, switch to `sha-<commit>` (or `dev`), or
 pin a release.
 
+## Upgrading to version 4.0.0 of the API
+
+Version 4.0.0 of the API removes `DELETE /deployment/{deployment-name}`,
+which deleted the pod of that name (not a deployment) and which Pubgrade
+never called; it now gets a 405. With the chart, its Role refused the call
+already, so deployments with the chart change nothing. If you gave the
+sidecar the right to delete pods with a Role of your own for this call,
+remove that right. Calls that update deployments (`PUT`) and read them
+(`GET`) are unchanged.
+
 ## Upgrading to version 3.2.0 of the API
 
 Version 3.2.0 of the API applies `TARGET_DEPLOYMENTS` (the chart's
@@ -143,10 +151,6 @@ calls change as follows:
   `registry:5000/org/app`) is no tag.
 - `registry-1.docker.io/` in `image_name` counts as Docker Hub, as
   `docker.io/` and `index.docker.io/` do.
-
-`DELETE /deployment/{deployment-name}` is unchanged: it deletes the pod of
-that name, not a deployment, so `TARGET_DEPLOYMENTS` doesn't apply to it, and
-the chart's Role refuses it.
 
 ## Upgrading to version 3.1.0 of the API
 

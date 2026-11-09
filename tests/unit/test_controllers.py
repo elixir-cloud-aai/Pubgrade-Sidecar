@@ -11,7 +11,6 @@ import pytest
 
 from pubgrade_sidecar import controllers
 from pubgrade_sidecar.controllers import (
-    deleteDeployment,
     getDeployment,
     getImage,
     updateDeployment,
@@ -121,7 +120,6 @@ def test_get_deployments_unauthorized() -> None:
     [
         getDeployment,
         lambda: getImage("pubgrade"),
-        lambda: deleteDeployment("pubgrade"),
         lambda: updateDeployment("pubgrade"),
     ],
 )
@@ -198,31 +196,6 @@ def test_get_image_not_found() -> None:
         pytest.raises(NotFound),
     ):
         getImage("pubgrade")
-
-
-@patch("kubernetes.client.CoreV1Api.delete_namespaced_pod")
-def test_delete_deployment(mock_delete: MagicMock) -> None:
-    """Test that the pod is deleted and the deletion confirmed."""
-    app = Flask(__name__)
-    with app.test_request_context("url", headers={"X-Access-Token": "test-token"}):
-        assert deleteDeployment("pubgrade") == "deleted: pubgrade"
-    mock_delete.assert_called_once_with(
-        "pubgrade",
-        controllers.namespace,
-        _request_timeout=controllers.REQUEST_TIMEOUT,
-    )
-
-
-def test_delete_deployment_unauthorized() -> None:
-    """Test that a wrong token is rejected when deleting."""
-    app = Flask(__name__)
-    with (
-        app.test_request_context(
-            "url", headers={"X-Access-Token": "wrong_access_token"}
-        ),
-        pytest.raises(Unauthorized),
-    ):
-        deleteDeployment("pubgrade")
 
 
 @patch(

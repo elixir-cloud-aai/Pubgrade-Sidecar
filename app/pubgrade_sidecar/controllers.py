@@ -58,7 +58,6 @@ def _load_kube_config() -> None:
 
 _load_kube_config()
 
-v1 = client.CoreV1Api()
 apiV1 = client.AppsV1Api()
 MAX_RETRY = 3
 RETRY_INTERVAL = 30
@@ -397,30 +396,6 @@ def getImage(deployment_name: str) -> Response:
         if rank > 1 and reported.detail:
             result["detail"] = reported.detail
     return jsonify(result)
-
-
-def deleteDeployment(deployment_name: str) -> str:
-    """Delete the pod of the given name.
-
-    Args:
-        deployment_name: Name of the pod.
-
-    Returns:
-        Confirmation of the deletion.
-
-    Raises:
-        Unauthorized: If the token is missing or wrong.
-        NotFound: If the pod doesn't exist.
-        Forbidden: If the sidecar has no right to delete the pod.
-    """
-    _check_token()
-    try:
-        v1.delete_namespaced_pod(
-            deployment_name, namespace, _request_timeout=REQUEST_TIMEOUT
-        )
-    except ApiException as exc:
-        _raise_api_error(exc)
-    return "deleted: " + deployment_name
 
 
 def updateDeployment(deployment_name: str) -> tuple[Response, int]:
