@@ -166,14 +166,15 @@ before, are now rolled out.
 
 ## Upgrading to version 3.0.0 of the API
 
-Version 3.0.0 of the API (November 2026) runs on FOCA 0.21 and Python 3.13
+Version 3.0.0 of the API (November 2026) runs on FOCA 0.22 and Python 3.13
 instead of FOCA 0.7 and Python 3.9. Calls and their successful responses stay
 the same, and so do the chart and its values. What changes:
 
 - **Errors are problem details** (`application/problem+json`, see
   [API](api.md)): `title`, `status` (an integer) and `detail` instead of `msg`
-  and `status_code` (a string). Clients that read the error body need to
-  change; Pubgrade only reads the status code.
+  and `status_code` (a string), and for requests that don't match the API's
+  schemas, the invalid fields in `errors`. Clients that read the error body
+  need to change; Pubgrade only reads the status code.
 - Errors of the Kubernetes API other than `403` and `404` are answered with
   `500`, as documented, instead of passing on their status (e.g., `503`).
 - Request bodies larger than 64 KiB are rejected with `413`.
