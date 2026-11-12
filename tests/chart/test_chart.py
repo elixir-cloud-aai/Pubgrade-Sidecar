@@ -320,3 +320,40 @@ def test_no_registry_settings_by_default() -> None:
     assert not names & {"REGISTRY_AUTH_FILE", "INSECURE_REGISTRIES"}
     assert "volumeMounts" not in container
     assert "volumes" not in pod
+
+
+def millicores(quantity: str | float) -> float:
+    """Convert a Kubernetes CPU quantity to millicores.
+
+    Args:
+        quantity: CPU quantity, e.g., `50m`, `0.5` or `1`.
+
+    Returns:
+        The quantity in millicores.
+    """
+    text = str(quantity)
+    if text.endswith("m"):
+        return float(text[:-1])
+    return float(text) * 1000
+
+
+@pytest.mark.parametrize("quantity,expected", [("50m", 50), ("0.5", 500), (2, 2000)])
+def test_millicores(quantity: str | float, expected: float) -> None:
+    """Test the conversion of CPU quantities used by the resource tests."""
+    assert millicores(quantity) == expected
+
+
+def test_default_resources_fit_limit_ranges() -> None:
+    """Test that every container sets CPU request and limit at a ratio of at most 5.
+
+    Clusters with a LimitRange often cap the ratio at 5 and give containers
+    without a limit a default one, which could exceed that ratio.
+    """
+    pod = render()["Deployment"]["spec"]["template"]["spec"]
+    for container in pod["containers"]:
+        resources = container["resources"]
+        request = millicores(resources["requests"]["cpu"])
+        limit = millicores(resources["limits"]["cpu"])
+        assert 0 < request <= limit <= 5 * request, container["name"]
+        assert resources["requests"]["memory"]
+        assert resources["limits"]["memory"]
