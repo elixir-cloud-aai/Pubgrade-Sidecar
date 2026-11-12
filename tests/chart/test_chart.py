@@ -87,6 +87,8 @@ def render(*settings: str) -> dict[str, dict[str, Any]]:
         ([*REQUIRED, "appName=" + "a" * 64], "appName"),
         ([*REQUIRED[1:], "targetDeployments=tesk-api"], "targetDeployments"),
         ([*REQUIRED[1:], "targetDeployments[0]=123"], "targetDeployments"),
+        ([*REQUIRED, "podSecurityContext.seccompProfile=false"], "seccompProfile"),
+        ([*REQUIRED, "securityContext.seccompProfile=false"], "seccompProfile"),
     ],
 )
 def test_incomplete_values_fail(settings: list[str], message: str) -> None:
