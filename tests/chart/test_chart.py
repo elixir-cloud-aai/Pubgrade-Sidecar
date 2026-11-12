@@ -134,7 +134,6 @@ def test_no_fixed_user() -> None:
     """Test that the pod works with the user that OpenShift assigns."""
     spec = render()["Deployment"]["spec"]["template"]["spec"]
     assert "runAsUser" not in spec["securityContext"]
-    assert spec["securityContext"]["runAsNonRoot"] is True
     assert "runAsUser" not in spec["containers"][0]["securityContext"]
 
 
@@ -169,7 +168,10 @@ def test_seccomp_profile_can_be_removed(setting: str) -> None:
     """
     spec = render(setting)["Deployment"]["spec"]["template"]["spec"]
     assert spec["securityContext"] == {"runAsNonRoot": True}
-    assert "seccompProfile" not in spec["containers"][0]["securityContext"]
+    assert spec["containers"][0]["securityContext"] == {
+        "allowPrivilegeEscalation": False,
+        "capabilities": {"drop": ["ALL"]},
+    }
 
 
 def test_security_contexts_can_be_set() -> None:
@@ -187,9 +189,8 @@ def test_security_contexts_can_be_set() -> None:
 
 def test_security_contexts_can_be_removed() -> None:
     """Test that security contexts set to null aren't rendered."""
-    spec = render("podSecurityContext=null", "securityContext=null")["Deployment"][
-        "spec"
-    ]["template"]["spec"]
+    resources = render("podSecurityContext=null", "securityContext=null")
+    spec = resources["Deployment"]["spec"]["template"]["spec"]
     assert "securityContext" not in spec
     assert "securityContext" not in spec["containers"][0]
 
