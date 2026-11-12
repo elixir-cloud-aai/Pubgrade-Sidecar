@@ -77,3 +77,21 @@ resources:
   limits:
     cpu: 250m
     memory: 256Mi
+
+# Security context of the pod. No fixed user: OpenShift assigns one per
+# namespace, and the image's user applies elsewhere. Values you set are merged
+# with these defaults; set a key to `null` to remove it. Clusters that set
+# their own seccomp profile and reject pods that name one (e.g., CSC Rahti)
+# need `seccompProfile: null` (an empty map, `{}`, is merged with this default
+# and keeps its type)
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# Security context of the container, merged with these defaults in the same way
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
