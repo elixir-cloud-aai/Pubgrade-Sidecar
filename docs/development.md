@@ -148,12 +148,9 @@ release.
 
 The images are scanned for known vulnerabilities with Trivy: in CI, in the
 release workflow before the image is signed and tagged, and weekly for
-`latest` (`.github/workflows/scan.yml`). The scans in CI and of releases fail
-on critical and high vulnerabilities that have a fix; accept a finding only
-with a reason and an expiry date, in `.trivyignore.yaml`. The weekly scan
-doesn't fail until the first release, as `latest` is still the last image
-built on FOCA 0.7; once the first release has published `latest`, drop
-`fail: "false"` there so that it fails too.
+`latest` (`.github/workflows/scan.yml`). All three fail on critical and high
+vulnerabilities that have a fix; accept a finding only with a reason and an
+expiry date, in `.trivyignore.yaml`.
 
 The scripts in `scripts/` use only the standard library and are tested in
 `tests/unit/`, with the app's coverage.
