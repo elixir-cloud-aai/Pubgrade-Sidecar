@@ -7,7 +7,8 @@
 # user ID with group 0, as on OpenShift, and its target Deployment spells the
 # image with the `docker.io/` prefix. In the first one, a notification for all
 # Deployments of an image repository also updates a Deployment with several
-# containers.
+# containers, and the check of deployed instances (`tests/check_deployment.sh`)
+# runs against its sidecar.
 #
 # Needs bash 4.4 or newer, Docker (privileged containers), kubectl, Helm, curl
 # and jq, and Internet access: the cluster pulls the target images from Docker
@@ -102,6 +103,25 @@ expect() {
     echo "FAIL  ${what}: want ${want}, got ${got}"
     FAILED=1
   fi
+}
+
+# Checks the exit status of a command and that its output (stdout and stderr,
+# to `${WORK}/output`, shown on failure) has a line that matches an extended
+# regular expression; records a failure, so that all checks run
+expect_exit() {
+  local what="$1" want="$2" pattern="$3" got=0
+  shift 3
+  "$@" > "${WORK}/output" 2>&1 || got=$?
+  if [[ "${got}" != "${want}" ]]; then
+    echo "FAIL  check script ${what}: want exit status ${want}, got ${got}"
+  elif ! grep --quiet --extended-regexp -- "${pattern}" "${WORK}/output"; then
+    echo "FAIL  check script ${what}: no line matches ${pattern}"
+  else
+    echo "ok    check script ${what}"
+    return
+  fi
+  sed 's/^/      /' "${WORK}/output"
+  FAILED=1
 }
 
 # Calls the sidecar of a namespace; the body goes to `${WORK}/body`, the
@@ -287,6 +307,61 @@ for ns in "${NAMESPACES[@]}"; do
   expect "notification accepted" 202 \
     "$(notify "${ns}" tesk-api "${TARGET_REPO}" "${NEW_TAG}")"
 done
+
+echo "== check script"
+# The check of deployed instances (`tests/check_deployment.sh`), over the port
+# forward (HTTP, so its HTTPS checks are skipped): it passes as configured,
+# fails for the right reason with a wrong token, a target that isn't one, a
+# non-target that is one, an `http://` URL without `CHECK_ALLOW_HTTP=1` or to
+# another host, and refuses wrong usage. Its HTTPS checks need a host with a
+# certificate, so they don't run here
+check="${ROOT}/tests/check_deployment.sh"
+url="http://127.0.0.1:${PORTS[site-a]}"
+allowed=(env ACCESS_TOKEN="${TOKEN}" CHECK_ALLOW_HTTP=1 "${check}" "${url}")
+expect_exit "passes" 0 '^Check passed$' "${allowed[@]}" tesk-api bystander
+# A proxy of the environment (here, a port without a server) isn't used over
+# HTTP, so the token stays on this machine
+expect_exit "bypasses proxies over HTTP" 0 '^Check passed$' \
+  env http_proxy=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 \
+  ALL_PROXY=http://127.0.0.1:9 "${allowed[@]}" tesk-api
+# The target gets the new tag of the notification above, so its image has
+# either tag, and the delivery may be in any state that isn't a failure
+expect_exit "reports the status" 0 \
+  "^ +\\{\"image\":\"${TARGET_REPO}:(${OLD_TAG}|${NEW_TAG})\",\"status\":\"(waiting_for_image|rolling_out|complete)\"\\}$" \
+  "${allowed[@]}" tesk-api
+expect_exit "checks a missing token" 0 '^ok    token missing \(400\)$' \
+  "${allowed[@]}" tesk-api
+expect_exit "checks a wrong token" 0 '^ok    token wrong \(401\)$' \
+  "${allowed[@]}" tesk-api
+expect_exit "checks the non-target" 0 \
+  '^ok    non-target bystander refused \(403\)$' \
+  "${allowed[@]}" tesk-api bystander
+expect_exit "fails with a wrong token" 1 \
+  '^FAIL  Deployments listed: want status 200, got 401' \
+  env ACCESS_TOKEN=wrong CHECK_ALLOW_HTTP=1 "${check}" "${url}" tesk-api
+expect_exit "fails for a Deployment outside the targets" 1 \
+  '^FAIL  target bystander listed: got \[' "${allowed[@]}" bystander tesk-api
+expect_exit "fails for a non-target that is a target" 1 \
+  '^FAIL  non-target tesk-api refused: want status 403, got 200' \
+  "${allowed[@]}" tesk-worker tesk-api
+expect_exit "refuses HTTP without CHECK_ALLOW_HTTP" 1 "isn't an https:// URL" \
+  env ACCESS_TOKEN="${TOKEN}" "${check}" "${url}" tesk-api
+expect_exit "refuses HTTP to another host" 1 "isn't an https:// URL" \
+  env ACCESS_TOKEN="${TOKEN}" CHECK_ALLOW_HTTP=1 \
+  "${check}" http://sidecar.example.org tesk-api
+expect_exit "needs a token" 2 '^ACCESS_TOKEN is not set' \
+  env -u ACCESS_TOKEN "${check}" "${url}" tesk-api
+expect_exit "needs a single-line token" 2 'must be a single line' \
+  env ACCESS_TOKEN=$'a\nb' "${check}" "${url}" tesk-api
+expect_exit "needs two or three arguments" 2 '^Usage: ' \
+  env ACCESS_TOKEN="${TOKEN}" "${check}" "${url}"
+expect_exit "needs Deployment names" 2 '^Not a Deployment name: Tesk_API$' \
+  env ACCESS_TOKEN="${TOKEN}" "${check}" "${url}" Tesk_API
+expect_exit "needs a non-target other than the target" 2 'must differ' \
+  env ACCESS_TOKEN="${TOKEN}" "${check}" "${url}" tesk-api tesk-api
+expect_exit "refuses user information in the URL" 2 '^Not a valid base URL' \
+  env ACCESS_TOKEN="${TOKEN}" "${check}" https://user@sidecar.example.org \
+  tesk-api
 
 for ns in "${NAMESPACES[@]}"; do
   echo "== rollout in ${ns}"
