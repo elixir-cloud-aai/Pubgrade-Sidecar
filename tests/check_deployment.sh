@@ -15,7 +15,9 @@
 #
 # Usage: tests/check_deployment.sh <url> <target> [<non-target>]
 #   url         Base URL of the sidecar, e.g., https://sidecar.example.org
-#   target      A Deployment of `targetDeployments` that exists
+#   target      A Deployment of `targetDeployments` that exists (and has
+#               the label of `deploymentLabel`, if set, as only those are
+#               listed)
 #   non-target  A Deployment name that isn't a target (default:
 #               pubgrade-check-not-a-target; it needn't exist)
 # Environment: ACCESS_TOKEN, the sidecar's token (required); CA_CERT, a CA
@@ -84,6 +86,10 @@ fi
 # Without `~/.curlrc` (`-q`, first), which could, e.g., print the headers;
 # only the scheme of the URL
 CURL=(curl -q --silent --show-error --max-time 15 --proto "=${SCHEME}")
+# Over HTTP (to this machine), never through a proxy, which would see the token
+if [[ "${SCHEME}" == http ]]; then
+  CURL+=(--noproxy '*')
+fi
 if [[ -n "${CA_CERT:-}" ]]; then
   CURL+=(--cacert "${CA_CERT}")
 fi
@@ -161,8 +167,12 @@ else
     ok "HTTP not served (no answer on port 80)"
   elif [[ "${code}" == 3?? && "${location}" == https://* ]]; then
     ok "HTTP redirected to HTTPS (${code})"
-  else
+  elif [[ "${code}" == 2?? || "${code}" == 400 || "${code}" == 401 ]]; then
+    # What the API answers a call without a token (400), or something served
     fail "HTTP not served: http://${HOST}${BASE_PATH}/deployment answered ${code}, want a redirect to HTTPS or no answer"
+  else
+    # E.g., a default backend (404) or a proxy (403, 502): not the API
+    ok "HTTP not served (answered ${code}, not the API)"
   fi
 fi
 

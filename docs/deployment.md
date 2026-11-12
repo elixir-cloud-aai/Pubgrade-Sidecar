@@ -86,11 +86,13 @@ notification, so nothing is rolled out. It needs bash, curl and jq, and checks
 that:
 
 - the URL is `https://` (otherwise it stops before sending the token), the
-  certificate is valid, and plain HTTP on port 80 of the same host gets no
-  answer or a redirect to HTTPS (skipped if the URL has a port);
+  certificate is valid, and plain HTTP on port 80 of the same host doesn't
+  serve the API: no answer, a redirect to HTTPS, or another error than the
+  API's (e.g., 404 from a default backend) (skipped if the URL has a port);
 - calls without a token get 400, and calls with a wrong one 401;
-- `GET /deployment` lists the target Deployment, and
-  `GET /deployment/{name}` reports its status (printed);
+- `GET /deployment` lists the target Deployment (with `deploymentLabel`, it
+  must have that label), and `GET /deployment/{name}` reports its status
+  (printed);
 - a Deployment that isn't in `targetDeployments` gets 403 (by default
   `pubgrade-check-not-a-target`, which needn't exist; a third argument names
   another one).
