@@ -77,6 +77,41 @@ token at start:
 kubectl -n production rollout restart deployment/pubgrade-sidecar
 ```
 
+## Checking a deployed sidecar
+
+[`tests/check_deployment.sh`](https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/blob/dev/tests/check_deployment.sh)
+checks a sidecar from outside, over its Route or Ingress, after installing or
+upgrading it, or after changing the token. It only reads: it sends no
+notification, so nothing is rolled out. It needs bash, curl and jq, and checks
+that:
+
+- the URL is `https://` (otherwise it stops before sending the token), the
+  certificate is valid, and plain HTTP on port 80 of the same host gets no
+  answer or a redirect to HTTPS (skipped if the URL has a port);
+- calls without a token get 400, and calls with a wrong one 401;
+- `GET /deployment` lists the target Deployment, and
+  `GET /deployment/{name}` reports its status (printed);
+- a Deployment that isn't in `targetDeployments` gets 403 (by default
+  `pubgrade-check-not-a-target`, which needn't exist; a third argument names
+  another one).
+
+The token comes from the environment variable `ACCESS_TOKEN` and goes to curl
+on its standard input, never on the command line. For example, with the token
+from the Secret of step 1:
+
+```bash
+ACCESS_TOKEN="$(kubectl -n production get secret pubgrade-sidecar \
+  -o jsonpath='{.data.access-token}' | base64 -d)" \
+  tests/check_deployment.sh https://sidecar.example.org tesk-api
+```
+
+It prints one line per check (`ok`, `FAIL` or `skip`) and exits with 0 if all
+passed, 1 if any failed, and 2 for wrong usage. `CA_CERT` names a CA
+certificate to verify the server with, e.g., for a private CA.
+`CHECK_ALLOW_HTTP=1` allows an `http://` URL to the local machine (e.g., a
+`kubectl port-forward`) and skips the HTTPS checks; the integration test uses
+it.
+
 ## Registries
 
 Before a rollout, the sidecar checks that the image is in its registry, with

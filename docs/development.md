@@ -51,7 +51,9 @@ the image, starts k3s in a Docker container, installs the chart into two
 namespaces and checks that notifications roll the target Deployments out to
 the new tag and that the status reports it, with the chart's minimal Role, and
 in one namespace under an arbitrary user ID with group 0, as on OpenShift. It
-takes about five minutes and needs bash 4.4 or newer, Docker (privileged
+also runs the check of deployed instances (`tests/check_deployment.sh`, see
+[Deployment](deployment.md#checking-a-deployed-sidecar)) against one of the
+sidecars, over a port forward. It takes about five minutes and needs bash 4.4 or newer, Docker (privileged
 containers), kubectl, Helm, curl, jq and access to Docker Hub. At the end, it
 removes the cluster, with its volumes, and the image it built; kubectl and Helm
 use a kubeconfig of their own, so other clusters aren't touched:

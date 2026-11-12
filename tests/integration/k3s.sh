@@ -7,7 +7,8 @@
 # user ID with group 0, as on OpenShift, and its target Deployment spells the
 # image with the `docker.io/` prefix. In the first one, a notification for all
 # Deployments of an image repository also updates a Deployment with several
-# containers.
+# containers, and the check of deployed instances (`tests/check_deployment.sh`)
+# runs against its sidecar.
 #
 # Needs bash 4.4 or newer, Docker (privileged containers), kubectl, Helm, curl
 # and jq, and Internet access: the cluster pulls the target images from Docker
@@ -100,6 +101,21 @@ expect() {
     echo "ok    ${what}"
   else
     echo "FAIL  ${what}: want ${want}, got ${got}"
+    FAILED=1
+  fi
+}
+
+# Checks the exit status of a command, whose output goes to `${WORK}/output`
+# (shown on failure); records a failure, so that all checks run
+expect_exit() {
+  local what="$1" want="$2" got=0
+  shift 2
+  "$@" > "${WORK}/output" 2>&1 || got=$?
+  if [[ "${got}" == "${want}" ]]; then
+    echo "ok    check script ${what}"
+  else
+    echo "FAIL  check script ${what}: want exit status ${want}, got ${got}"
+    sed 's/^/      /' "${WORK}/output"
     FAILED=1
   fi
 }
@@ -286,6 +302,27 @@ for ns in "${NAMESPACES[@]}"; do
   expect "notification accepted" 202 \
     "$(notify "${ns}" tesk-api "${TARGET_REPO}" "${NEW_TAG}")"
 done
+
+echo "== check script"
+# The check of deployed instances (`tests/check_deployment.sh`), over the port
+# forward (HTTP, so its HTTPS checks are skipped); it passes as configured,
+# and fails with a wrong token, a target that isn't one, an `http://` URL
+# without `CHECK_ALLOW_HTTP=1`, or one to another host
+check="${ROOT}/tests/check_deployment.sh"
+url="http://127.0.0.1:${PORTS[site-a]}"
+expect_exit "passes" 0 env ACCESS_TOKEN="${TOKEN}" CHECK_ALLOW_HTTP=1 \
+  "${check}" "${url}" tesk-api bystander
+expect_exit "fails with a wrong token" 1 env ACCESS_TOKEN=wrong \
+  CHECK_ALLOW_HTTP=1 "${check}" "${url}" tesk-api
+expect_exit "fails for a Deployment outside the targets" 1 \
+  env ACCESS_TOKEN="${TOKEN}" CHECK_ALLOW_HTTP=1 \
+  "${check}" "${url}" bystander tesk-api
+expect_exit "refuses HTTP without CHECK_ALLOW_HTTP" 1 \
+  env ACCESS_TOKEN="${TOKEN}" "${check}" "${url}" tesk-api
+expect_exit "refuses HTTP to another host" 1 \
+  env ACCESS_TOKEN="${TOKEN}" CHECK_ALLOW_HTTP=1 \
+  "${check}" http://sidecar.example.org tesk-api
+expect_exit "needs a token" 2 env -u ACCESS_TOKEN "${check}" "${url}" tesk-api
 
 for ns in "${NAMESPACES[@]}"; do
   echo "== rollout in ${ns}"
