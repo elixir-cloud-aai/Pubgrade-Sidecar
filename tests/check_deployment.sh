@@ -167,6 +167,8 @@ else
     ok "HTTP not served (no answer on port 80)"
   elif [[ "${code}" == 3?? && "${location}" == https://* ]]; then
     ok "HTTP redirected to HTTPS (${code})"
+  elif [[ "${code}" == 3?? ]]; then
+    fail "HTTP not served: http://${HOST}${BASE_PATH}/deployment redirected to ${location:-nothing}, not to HTTPS"
   elif [[ "${code}" == 2?? || "${code}" == 400 || "${code}" == 401 ]]; then
     # What the API answers a call without a token (400), or something served
     fail "HTTP not served: http://${HOST}${BASE_PATH}/deployment answered ${code}, want a redirect to HTTPS or no answer"
