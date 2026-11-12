@@ -234,8 +234,9 @@ for ns in "${NAMESPACES[@]}"; do
     --set image.pullPolicy=Never > /dev/null
 done
 # In site-b, an arbitrary user ID with group 0, as OpenShift assigns them. The
-# chart has no value for the user (OpenShift sets it), so the Deployment is
-# patched, which rolls it out again
+# Deployment is patched after the install, as OpenShift sets the user after
+# the chart, which rolls it out again. The patch adds to the pod's security
+# context, so it needs the chart's default `podSecurityContext`
 kubectl -n site-b patch deployment pubgrade-sidecar --type=json --patch "$(
   jq --null-input --compact-output --argjson uid "${ARBITRARY_UID}" '[
     {op: "add", path: "/spec/template/spec/securityContext/runAsUser",

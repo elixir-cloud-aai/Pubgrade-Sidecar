@@ -20,21 +20,18 @@ spec:
     spec:
       serviceAccountName: {{ .Values.appName }}
       automountServiceAccountToken: true
-      # No fixed user: OpenShift assigns one per namespace, and the image's
-      # user applies elsewhere
+      {{- with include "pubgrade-sidecar.securityContext" .Values.podSecurityContext }}
       securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+        {{- . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Values.appName }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with include "pubgrade-sidecar.securityContext" .Values.securityContext }}
           securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+            {{- . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 8080
