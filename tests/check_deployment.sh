@@ -73,11 +73,11 @@ HOST="${BASH_REMATCH[2]}"
 PORT="${BASH_REMATCH[3]}"
 BASE_PATH="${BASH_REMATCH[4]}"
 if [[ "${SCHEME}" == http ]]; then
+  local_host=0
   case "${HOST}" in
-    localhost | 127.0.0.1 | "[::1]") ;;
-    *) HOST="" ;;
+    localhost | 127.0.0.1 | "[::1]") local_host=1 ;;
   esac
-  if [[ "${CHECK_ALLOW_HTTP:-}" != 1 || -z "${HOST}" ]]; then
+  if [[ "${CHECK_ALLOW_HTTP:-}" != 1 || "${local_host}" != 1 ]]; then
     echo "FAIL  HTTPS: ${URL} isn't an https:// URL; the token isn't sent." >&2
     exit 1
   fi
@@ -151,8 +151,10 @@ excerpt() {
 echo "== ${URL}"
 
 # HTTPS: the certificate is verified by every call below. Plain HTTP on the
-# same host must not serve the API: no answer, or a redirect to HTTPS. With a
-# port in the URL, the HTTP port is unknown, so this is skipped
+# same host must not serve the API: no answer, a redirect to HTTPS, or an
+# error that the API doesn't give a call without a token (it checks the
+# request first and gives 400, or 401 for a wrong token). With a port in the
+# URL, the HTTP port is unknown, so this is skipped
 if [[ "${SCHEME}" == http ]]; then
   echo "skip  HTTPS (CHECK_ALLOW_HTTP=1)"
 elif [[ -n "${PORT}" ]]; then
@@ -171,7 +173,7 @@ else
     fail "HTTP not served: http://${HOST}${BASE_PATH}/deployment redirected to ${location:-nothing}, not to HTTPS"
   elif [[ "${code}" == 2?? || "${code}" == 400 || "${code}" == 401 ]]; then
     # What the API answers a call without a token (400), or something served
-    fail "HTTP not served: http://${HOST}${BASE_PATH}/deployment answered ${code}, want a redirect to HTTPS or no answer"
+    fail "HTTP not served: http://${HOST}${BASE_PATH}/deployment answered ${code}, want no answer, a redirect to HTTPS or an error that isn't the API's"
   else
     # E.g., a default backend (404) or a proxy (403, 502): not the API
     ok "HTTP not served (answered ${code}, not the API)"

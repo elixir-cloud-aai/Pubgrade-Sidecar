@@ -318,6 +318,11 @@ check="${ROOT}/tests/check_deployment.sh"
 url="http://127.0.0.1:${PORTS[site-a]}"
 allowed=(env ACCESS_TOKEN="${TOKEN}" CHECK_ALLOW_HTTP=1 "${check}" "${url}")
 expect_exit "passes" 0 '^Check passed$' "${allowed[@]}" tesk-api bystander
+# A proxy of the environment (here, a port without a server) isn't used over
+# HTTP, so the token stays on this machine
+expect_exit "bypasses proxies over HTTP" 0 '^Check passed$' \
+  env http_proxy=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 \
+  ALL_PROXY=http://127.0.0.1:9 "${allowed[@]}" tesk-api
 expect_exit "reports the status" 0 '^ +\{"image":".+","status":".+"\}$' \
   "${allowed[@]}" tesk-api
 expect_exit "checks the token" 0 '^ok    token missing \(400\)$' \
