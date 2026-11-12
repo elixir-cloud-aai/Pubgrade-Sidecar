@@ -41,6 +41,8 @@
       "type": "array",
       "items": {"type": "string", "pattern": "^[A-Za-z0-9.-]+(:[0-9]+)?$"}
     },
-    "hostName": {"type": "string"}
+    "hostName": {"type": "string"},
+    "podSecurityContext": {"type": "object"},
+    "securityContext": {"type": "object"}
   }
 }

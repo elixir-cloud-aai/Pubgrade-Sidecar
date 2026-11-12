@@ -77,6 +77,35 @@ token at start:
 kubectl -n production rollout restart deployment/pubgrade-sidecar
 ```
 
+## Security contexts
+
+The security contexts of the pod and the container are the values
+`podSecurityContext` and `securityContext`, in Helm's usual form. By default,
+the pod runs as non-root with the container runtime's seccomp profile
+(`RuntimeDefault`), and the container without privilege escalation or
+capabilities. Values you set are merged with these defaults; set a key to
+`null` to remove it.
+
+Some clusters set their own seccomp profile and reject pods that name one,
+e.g., CSC Rahti (OpenShift) since November 2026. There, remove the profile in
+the values:
+
+```yaml
+podSecurityContext:
+  seccompProfile: null
+```
+
+or with `--set podSecurityContext.seccompProfile=null`. An empty map
+(`seccompProfile: {}`) doesn't remove the profile, as Helm merges it with the
+default; `seccompProfile.type: null` does.
+
+Up to chart 0.2.0, the security contexts were fixed in the template. When
+upgrading a release installed with such a chart, don't use
+`helm upgrade --reuse-values`: it takes the old release's values instead of
+the new chart's defaults, which have no security contexts, so the pod would
+run without them. Pass your values again (`-f`), or use
+`--reset-then-reuse-values`.
+
 ## Registries
 
 Before a rollout, the sidecar checks that the image is in its registry, with

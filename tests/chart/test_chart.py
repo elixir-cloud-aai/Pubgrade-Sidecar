@@ -138,6 +138,62 @@ def test_no_fixed_user() -> None:
     assert "runAsUser" not in spec["containers"][0]["securityContext"]
 
 
+def test_security_contexts_default() -> None:
+    """Test that the pod and container are restricted by default."""
+    spec = render()["Deployment"]["spec"]["template"]["spec"]
+    assert spec["securityContext"] == {
+        "runAsNonRoot": True,
+        "seccompProfile": {"type": "RuntimeDefault"},
+    }
+    assert spec["containers"][0]["securityContext"] == {
+        "allowPrivilegeEscalation": False,
+        "capabilities": {"drop": ["ALL"]},
+    }
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "podSecurityContext.seccompProfile=null",
+        "podSecurityContext.seccompProfile.type=null",
+    ],
+)
+def test_seccomp_profile_can_be_removed(setting: str) -> None:
+    """Test that a removed or empty seccomp profile isn't rendered.
+
+    Clusters that set their own profile reject pods that name one (e.g., CSC
+    Rahti); the rest of the security context stays.
+
+    Args:
+        setting: Value that removes the profile or its type.
+    """
+    spec = render(setting)["Deployment"]["spec"]["template"]["spec"]
+    assert spec["securityContext"] == {"runAsNonRoot": True}
+    assert "seccompProfile" not in spec["containers"][0]["securityContext"]
+
+
+def test_security_contexts_can_be_set() -> None:
+    """Test that the security contexts take further settings."""
+    spec = render(
+        "podSecurityContext.fsGroup=1001",
+        "securityContext.readOnlyRootFilesystem=true",
+    )["Deployment"]["spec"]["template"]["spec"]
+    assert spec["securityContext"]["fsGroup"] == 1001
+    assert spec["securityContext"]["seccompProfile"] == {"type": "RuntimeDefault"}
+    container = spec["containers"][0]["securityContext"]
+    assert container["readOnlyRootFilesystem"] is True
+    assert container["allowPrivilegeEscalation"] is False
+
+
+def test_security_contexts_can_be_removed() -> None:
+    """Test that security contexts set to null aren't rendered."""
+    spec = render("podSecurityContext=null", "securityContext=null")["Deployment"][
+        "spec"
+    ]["template"]["spec"]
+    assert "securityContext" not in spec
+    assert "securityContext" not in spec["containers"][0]
+
+
 def test_service_reaches_container() -> None:
     """Test that the Service uses the named port of the container."""
     resources = render("service.port=9000")
