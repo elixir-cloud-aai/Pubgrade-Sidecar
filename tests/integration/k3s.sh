@@ -323,10 +323,18 @@ expect_exit "passes" 0 '^Check passed$' "${allowed[@]}" tesk-api bystander
 expect_exit "bypasses proxies over HTTP" 0 '^Check passed$' \
   env http_proxy=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 \
   ALL_PROXY=http://127.0.0.1:9 "${allowed[@]}" tesk-api
-expect_exit "reports the status" 0 '^ +\{"image":".+","status":".+"\}$' \
+# The target gets the new tag of the notification above, so its image has
+# either tag, and the delivery may be in any state that isn't a failure
+expect_exit "reports the status" 0 \
+  "^ +\\{\"image\":\"${TARGET_REPO}:(${OLD_TAG}|${NEW_TAG})\",\"status\":\"(waiting_for_image|rolling_out|complete)\"\\}$" \
   "${allowed[@]}" tesk-api
-expect_exit "checks the token" 0 '^ok    token missing \(400\)$' \
+expect_exit "checks a missing token" 0 '^ok    token missing \(400\)$' \
   "${allowed[@]}" tesk-api
+expect_exit "checks a wrong token" 0 '^ok    token wrong \(401\)$' \
+  "${allowed[@]}" tesk-api
+expect_exit "checks the non-target" 0 \
+  '^ok    non-target bystander refused \(403\)$' \
+  "${allowed[@]}" tesk-api bystander
 expect_exit "fails with a wrong token" 1 \
   '^FAIL  Deployments listed: want status 200, got 401' \
   env ACCESS_TOKEN=wrong CHECK_ALLOW_HTTP=1 "${check}" "${url}" tesk-api

@@ -87,10 +87,11 @@ that:
 
 - the URL is `https://` (otherwise it stops before sending the token), the
   certificate is valid, and plain HTTP on port 80 of the same host doesn't
-  serve the API: no answer, a redirect to HTTPS, or an error that the API
-  doesn't give a call without a token (anything but 400 and 401, e.g., 404
-  from a default backend; 2xx and other redirects fail) (skipped if the URL
-  has a port);
+  serve the API (skipped if the URL has a port). It passes on no answer
+  (connection refused or timed out; other errors, e.g., of name resolution,
+  fail), a redirect to HTTPS, or an error that the API doesn't give a call
+  without a token (anything but 400 and 401, e.g., 404 from a default
+  backend); 2xx and other redirects fail;
 - calls without a token get 400, and calls with a wrong one 401;
 - `GET /deployment` lists the target Deployment (with `deploymentLabel`, it
   must have that label), and `GET /deployment/{name}` reports its status

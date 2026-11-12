@@ -28,6 +28,8 @@
 # Prints one line per check, `ok`, `FAIL` or `skip`. Exit status: 0 if all
 # checks passed, 1 if any failed, 2 for wrong usage.
 set -euo pipefail
+# No trace (e.g., `bash -x`), which would print the token
+{ set +x; } 2> /dev/null
 
 usage() {
   echo "Usage: $0 <url> <target> [<non-target>]" >&2
@@ -40,6 +42,8 @@ URL="${1%/}"
 TARGET="$2"
 NON_TARGET="${3:-pubgrade-check-not-a-target}"
 TOKEN="${ACCESS_TOKEN:-}"
+# Not passed on to curl and the other commands in their environment
+unset ACCESS_TOKEN
 # Kubernetes object names (DNS subdomains), so that they are safe in a path
 NAME_PATTERN='^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$'
 
@@ -84,8 +88,9 @@ if [[ "${SCHEME}" == http ]]; then
 fi
 
 # Without `~/.curlrc` (`-q`, first), which could, e.g., print the headers;
-# only the scheme of the URL
-CURL=(curl -q --silent --show-error --max-time 15 --proto "=${SCHEME}")
+# only the scheme of the URL. `GET /deployment` reads the targets one after
+# the other, each within 10 seconds, so a few of them take a while
+CURL=(curl -q --silent --show-error --max-time 30 --proto "=${SCHEME}")
 # Over HTTP (to this machine), never through a proxy, which would see the token
 if [[ "${SCHEME}" == http ]]; then
   CURL+=(--noproxy '*')
@@ -160,13 +165,18 @@ if [[ "${SCHEME}" == http ]]; then
 elif [[ -n "${PORT}" ]]; then
   echo "skip  HTTP not served (the URL has a port; check the HTTP port yourself)"
 else
+  error=0
   result="$(curl -q --silent --max-time 10 --proto "=http" --output /dev/null \
     --write-out '%{http_code} %{redirect_url}' \
-    "http://${HOST}${BASE_PATH}/deployment" 2> /dev/null)" || result=""
+    "http://${HOST}${BASE_PATH}/deployment" 2> /dev/null)" || error=$?
   code="${result%% *}"
   location="${result#* }"
-  if [[ -z "${result}" || "${code}" == 000 ]]; then
+  # Refused (7) or dropped (28, the timeout): no answer. Other errors, e.g.,
+  # of name resolution or a proxy, prove nothing
+  if ((error == 7 || error == 28)); then
     ok "HTTP not served (no answer on port 80)"
+  elif ((error != 0)); then
+    fail "HTTP not served: the call of http://${HOST}${BASE_PATH}/deployment failed (curl exit status ${error})"
   elif [[ "${code}" == 3?? && "${location}" == https://* ]]; then
     ok "HTTP redirected to HTTPS (${code})"
   elif [[ "${code}" == 3?? ]]; then
@@ -189,7 +199,8 @@ expect_status "token wrong" 401 "$(call /deployment "${wrong}")"
 status="$(call /deployment "${TOKEN}")"
 expect_status "Deployments listed" 200 "${status}"
 if [[ "${status}" == 200 ]]; then
-  if jq --exit-status --arg name "${TARGET}" 'index($name) != null' \
+  if jq --exit-status --arg name "${TARGET}" \
+    'type == "array" and all(.[]; type == "string") and index($name) != null' \
     "${BODY}" > /dev/null 2>&1; then
     ok "target ${TARGET} listed"
   else
@@ -202,7 +213,14 @@ fi
 status="$(call "/deployment/${TARGET}" "${TOKEN}")"
 expect_status "status of ${TARGET}" 200 "${status}"
 if [[ "${status}" == 200 ]]; then
-  echo "      $(jq --compact-output '{image, status}' "${BODY}" 2> /dev/null || excerpt)"
+  # As in the API's `DeploymentStatus`
+  if jq --exit-status '(.image | type == "string") and (.status | IN(
+      "waiting_for_image", "rolling_out", "complete", "failed"))' \
+    "${BODY}" > /dev/null 2>&1; then
+    echo "      $(jq --compact-output '{image, status}' "${BODY}")"
+  else
+    fail "status of ${TARGET}: not a status: $(excerpt)"
+  fi
 fi
 
 expect_status "non-target ${NON_TARGET} refused" 403 \
