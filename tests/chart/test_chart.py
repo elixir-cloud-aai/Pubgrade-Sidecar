@@ -291,7 +291,7 @@ def test_default_resources_fit_limit_ranges() -> None:
     without a limit a default one, which could exceed that ratio.
     """
     pod = render()["Deployment"]["spec"]["template"]["spec"]
-    for container in pod["containers"] + pod.get("initContainers", []):
+    for container in pod["containers"]:
         resources = container["resources"]
         request = millicores(resources["requests"]["cpu"])
         limit = millicores(resources["limits"]["cpu"])

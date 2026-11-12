@@ -112,10 +112,12 @@ them are sent unencrypted.
 The chart sets the CPU and memory requests and limits of the container
 explicitly (`resources` in `deployment/values.yaml`: CPU 50m request and 250m
 limit, memory 128Mi and 256Mi), so that the default limits of a LimitRange in
-the namespace don't apply. Clusters with a LimitRange often cap the ratio of
-limit to request (`maxLimitRequestRatio`, e.g., 5 for CPU) and refuse pods
-above it at admission; the defaults keep the CPU ratio at 5. If you change
-`resources`, set requests and limits together, within the ratio and the
+the namespace don't apply. Earlier versions of the chart set no CPU limit; the
+250m limit now applies on every cluster. Clusters with a LimitRange often cap
+the ratio of limit to request (`maxLimitRequestRatio`, e.g., 5 for CPU) and
+refuse pods above it at admission; the defaults keep the CPU ratio at 5. If
+you change `resources`, set requests and limits together (a request above the
+default limit needs a higher limit too), within the ratio and the
 minimum and maximum of your LimitRange (`kubectl -n production get limitrange
 -o yaml` shows them), e.g.:
 
