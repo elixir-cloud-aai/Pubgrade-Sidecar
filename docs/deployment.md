@@ -108,11 +108,14 @@ ACCESS_TOKEN="$(kubectl -n production get secret pubgrade-sidecar \
 ```
 
 It prints one line per check (`ok`, `FAIL` or `skip`) and exits with 0 if all
-passed, 1 if any failed, and 2 for wrong usage. `CA_CERT` names a CA
-certificate to verify the server with, e.g., for a private CA.
-`CHECK_ALLOW_HTTP=1` allows an `http://` URL to the local machine (e.g., a
-`kubectl port-forward`) and skips the HTTPS checks; the integration test uses
-it.
+passed, 1 if any failed, and 2 for wrong usage; a URL that isn't `https://`
+fails (1) before any call. Calls over HTTPS use the proxy of the environment
+(`https_proxy`), and the check of plain HTTP that of `http_proxy`: behind a
+proxy, that check sees the proxy's answer. `CA_CERT` names a CA certificate
+to verify the server with, e.g., for a private CA. `CHECK_ALLOW_HTTP=1`
+allows an `http://` URL to `localhost`, `127.0.0.1` or `[::1]` (e.g., a
+`kubectl port-forward`), never through a proxy, and skips the HTTPS checks;
+the integration test uses it.
 
 ## Registries
 
