@@ -67,9 +67,13 @@ ingress:
 service:
   port: 8080
 
+# Requests and limits of the container, both set so that a LimitRange's
+# default limit doesn't apply. Many LimitRanges cap the CPU limit/request
+# ratio (often at 5): keep `limits.cpu` within it when changing `requests.cpu`
 resources:
   requests:
     cpu: 50m
     memory: 128Mi
   limits:
+    cpu: 250m
     memory: 256Mi

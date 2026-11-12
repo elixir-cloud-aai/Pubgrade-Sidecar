@@ -107,6 +107,28 @@ one in the cluster, go in `insecureRegistries` (`host` or `host:port`;
 environment variable `INSECURE_REGISTRIES`, comma-separated); credentials for
 them are sent unencrypted.
 
+## Resources
+
+The chart sets the CPU and memory requests and limits of the container
+explicitly (`resources` in `deployment/values.yaml`: CPU 50m request and 250m
+limit, memory 128Mi and 256Mi), so that the default limits of a LimitRange in
+the namespace don't apply. Clusters with a LimitRange often cap the ratio of
+limit to request (`maxLimitRequestRatio`, e.g., 5 for CPU) and refuse pods
+above it at admission; the defaults keep the CPU ratio at 5. If you change
+`resources`, set requests and limits together, within the ratio and the
+minimum and maximum of your LimitRange (`kubectl -n production get limitrange
+-o yaml` shows them), e.g.:
+
+```yaml
+resources:
+  requests:
+    cpu: 100m
+  limits:
+    cpu: 500m
+```
+
+Values you set are merged with the defaults; set a key to `null` to remove it.
+
 ## Changed image tags (November 2026)
 
 Until the release workflow was added (November 2026), every push to `dev`
