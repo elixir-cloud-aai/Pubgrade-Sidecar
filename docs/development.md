@@ -112,9 +112,8 @@ tag) and `version` (the SemVer form, e.g., `1.2.3-rc1` for `1.2.3rc1`), and
 the version in `CITATION.cff`. Until 1.0.0, all releases are GitHub
 pre-releases.
 
-For the first release, the chart's `version` (0.2.0, from before the
-release workflow) and the app's version (0.1.0) differ; the release-prep pull
-request sets both, e.g., to 0.2.0.
+The first release is 0.2.0, the chart's `version` from before the release
+workflow: its release-prep pull request moved the app from 0.1.0 to it.
 
 1. Release-prep pull request to `dev`: set the version in `pyproject.toml`,
    `deployment/Chart.yaml` (`version` and `appVersion`) and `CITATION.cff`
@@ -149,12 +148,9 @@ release.
 
 The images are scanned for known vulnerabilities with Trivy: in CI, in the
 release workflow before the image is signed and tagged, and weekly for
-`latest` (`.github/workflows/scan.yml`). The scans in CI and of releases fail
-on critical and high vulnerabilities that have a fix; accept a finding only
-with a reason and an expiry date, in `.trivyignore.yaml`. The weekly scan
-doesn't fail until the first release, as `latest` is still the last image
-built on FOCA 0.7; once the first release has published `latest`, drop
-`fail: "false"` there so that it fails too.
+`latest` (`.github/workflows/scan.yml`). All three fail on critical and high
+vulnerabilities that have a fix; accept a finding only with a reason and an
+expiry date, in `.trivyignore.yaml`.
 
 The scripts in `scripts/` use only the standard library and are tested in
 `tests/unit/`, with the app's coverage.

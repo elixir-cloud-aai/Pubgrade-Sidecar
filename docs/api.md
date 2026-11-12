@@ -12,7 +12,9 @@ The examples call the sidecar through its Route or Ingress, with TLS
 without a Route or Ingress, call its Service over plain HTTP instead, e.g.,
 `http://pubgrade-sidecar.{namespace}:8080`.
 
-Get the deployments in the namespace:
+Get the names of the deployments that the sidecar manages (those that
+`PUT /deployment` updates, see [Deployment](deployment.md)); the calls for one
+deployment answer 403 for others:
 
 ```bash
 curl --location --request GET 'https://{sidecar-host}/deployment' \
@@ -41,7 +43,9 @@ images, or several deployments of one image: subscribe it once per image
 repository. In every deployment the sidecar manages (`targetDeployments` of
 the chart; with `deploymentLabel`, only those with that label, see
 [Deployment](deployment.md)), every container whose image repository equals
-`image_name` gets the new tag. Other containers stay as they are. With 202,
+`image_name` gets the new tag. `image_name` is the repository without a tag or
+digest (a registry's port, e.g., `registry:5000/org/app`, is fine); with
+one, the call gets a 400. Other containers stay as they are. With 202,
 the response lists the deployments that roll out, with the requested image of
 their first container of the repository (with 200, all deployments that use
 it, with the image they use):
@@ -91,9 +95,13 @@ again, doesn't lead to a rollout.
 Status  Meaning
 200     The deployment already uses this image; nothing happens
 202     Accepted
-400     Invalid request, e.g., no `X-Access-Token` header or an invalid tag
+400     Invalid request, e.g., no `X-Access-Token` header, an invalid tag, or
+        an `image_name` with a tag or digest
 401     Wrong token, or no token configured in the sidecar
-403     The sidecar may not access this deployment
+403     The sidecar may not access this deployment: for `GET` and
+        `PUT /deployment/{deployment-name}`, `TARGET_DEPLOYMENTS`
+        (`targetDeployments`) doesn't name it; for any call, its Role doesn't
+        allow it
 404     Deployment not found; for `PUT /deployment`: no container uses the
         repository
 405     Method not allowed
@@ -117,9 +125,33 @@ e.g.:
 }
 ```
 
-For invalid requests, `detail` tells what is wrong, e.g.,
-`Missing header parameter 'X-Access-Token'`. Before, errors had `msg` and
-`status_code` (a string) instead (see
+Requests that don't match the API's schemas (e.g., without the
+`X-Access-Token` header, or without `tag`) list their invalid fields in
+`errors`, by location and with a stable `code`, but without their values
+(names of unknown parameters and body fields are echoed, though), and
+`detail` names them; only these responses have `type`, `code` and `errors`,
+e.g.:
+
+```json
+{
+  "type": "https://foca.readthedocs.io/en/latest/problems/invalid-request/",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "Invalid fields: #/tag (required); X-Access-Token (required)",
+  "code": "invalid-request",
+  "errors": [
+    {"detail": "Is required.", "pointer": "#/tag", "code": "required"},
+    {"detail": "Is required.", "parameter": "X-Access-Token", "code": "required"}
+  ]
+}
+```
+
+(see FOCA's
+[invalid request](https://foca.readthedocs.io/en/latest/problems/invalid-request/)
+for the codes). Other invalid requests, e.g., a body that isn't JSON or is
+`null`, an invalid tag or an `image_name` with a tag or digest, get
+`"detail": "The request is invalid."`, without `errors`. Before, errors had
+`msg` and `status_code` (a string) instead (see
 [Upgrading to version 3.0.0 of the API](deployment.md#upgrading-to-version-300-of-the-api)).
 
 The `GET` call above reports the state of the delivery. Since version 2.0.0 of

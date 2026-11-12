@@ -43,21 +43,27 @@ default security constraints apply.
    ```
 
    The chart deploys the image of its `appVersion` unless `image.tag` is set
-   (see [Image](#image)). Until the first release, that version has no image
-   yet: set `image.tag` to `sha-<commit>` or `dev`.
+   (see [Image](#image)): on `dev` and in a release, the image of that
+   release (e.g., `0.2.0`). To follow development instead, set `image.tag` to
+   `sha-<commit>` or `dev`.
 
 `PUT /deployment` updates all `targetDeployments` that use the notified image
 repository (see [API](api.md)). To limit it to some of them, set
 `deploymentLabel` to a label they have, `key=value`, or `key` for any value (a
-value without a key, e.g., `=api`, matches no deployment);
-`PUT /deployment/{name}` isn't limited by it. Outside the chart, the sidecar
+value without a key, e.g., `=api`, matches no deployment); `GET` and
+`PUT /deployment/{name}` aren't limited by it. Outside the chart, the sidecar
 takes these settings from the environment variables `TARGET_DEPLOYMENTS`
 (comma-separated names; without it, all deployments in the namespace, which
-needs the right to list them) and `DEPLOYMENT_LABEL`.
+needs the right to list them) and `DEPLOYMENT_LABEL`. `GET /deployment` lists
+the same deployments as `PUT /deployment` updates, and the calls for one
+deployment (`GET` and `PUT /deployment/{name}`) answer 403 for a deployment
+that `TARGET_DEPLOYMENTS` doesn't name. The deployments of
+`TARGET_DEPLOYMENTS` are read one after the other (each within 10 seconds),
+so with many of them, or a slow Kubernetes API, `GET /deployment` and
+`PUT /deployment` take longer than a caller such as Pubgrade (10 seconds by
+default) may wait: keep the list to what the sidecar has to update.
 
 The sidecar gets `get` and `patch` on the `targetDeployments` and nothing else.
-So with the chart, `GET /deployment` and `DELETE /deployment/{name}` are refused:
-they would need further rights, which you can add with a Role of your own.
 Kubernetes can't limit `patch` to one field, so these rights cover the whole of
 each listed Deployment, although the sidecar's API only changes the image tag.
 List only what the sidecar has to update, and add an admission policy in your
@@ -109,11 +115,42 @@ deployed `latest` by default. Now pushes to `dev` publish `dev` and
 `sha-<commit>`, `latest` moves only with releases, to the highest stable
 release, and dated tags are no longer published (existing ones stay as they
 are). The chart deploys the image of its `appVersion` unless `image.tag` is
-set. So `latest` stays at the last image published from `dev` before the
-change until the first release. If you pull `latest` (or deployed the chart
-with its default tag) to follow development, switch to `sha-<commit>` (or
-`dev`), or to a release once there is one; until the first release, set
-`image.tag` when you install the chart (see above).
+set. Since the first release, 0.2.0, `latest` is the image of the highest
+stable release. If you pulled `latest` (or deployed the chart with its
+default tag) to follow development, switch to `sha-<commit>` (or `dev`), or
+pin a release.
+
+## Upgrading to version 4.0.0 of the API
+
+Version 4.0.0 of the API removes `DELETE /deployment/{deployment-name}`,
+which deleted the pod of that name (not a deployment) and which Pubgrade
+never called; it now gets a 405. With the chart, its Role refused the call
+already, so deployments with the chart change nothing. If you gave the
+sidecar the right to delete pods with a Role of your own for this call,
+remove that right. Calls that update deployments (`PUT`) and read them
+(`GET`) are unchanged.
+
+## Upgrading to version 3.2.0 of the API
+
+Version 3.2.0 of the API applies `TARGET_DEPLOYMENTS` (the chart's
+`targetDeployments`) to `GET /deployment` and to `GET` and
+`PUT /deployment/{deployment-name}`, not only to `PUT /deployment`. These
+calls change as follows:
+
+- `GET /deployment` lists the deployments that `PUT /deployment` updates:
+  those in `TARGET_DEPLOYMENTS` that exist (read one by one, so the chart's
+  Role suffices), or all in the namespace without it; with
+  `DEPLOYMENT_LABEL`, only those with that label. Before, it listed all
+  deployments in the namespace, which the chart's Role refused.
+- `GET` and `PUT /deployment/{deployment-name}` answer 403 for a deployment
+  that `TARGET_DEPLOYMENTS` doesn't name, without calling the Kubernetes
+  API. With the chart, its Role refused these calls already.
+- Notifications whose `image_name` has a tag or a digest (e.g.,
+  `org/app:1.0`) get a 400. Before, the sidecar dropped them and answered
+  202, and the delivery failed later. A registry's port (e.g.,
+  `registry:5000/org/app`) is no tag.
+- `registry-1.docker.io/` in `image_name` counts as Docker Hub, as
+  `docker.io/` and `index.docker.io/` do.
 
 ## Upgrading to version 3.1.0 of the API
 
@@ -133,14 +170,15 @@ before, are now rolled out.
 
 ## Upgrading to version 3.0.0 of the API
 
-Version 3.0.0 of the API (November 2026) runs on FOCA 0.21 and Python 3.13
+Version 3.0.0 of the API (November 2026) runs on FOCA 0.22 and Python 3.13
 instead of FOCA 0.7 and Python 3.9. Calls and their successful responses stay
 the same, and so do the chart and its values. What changes:
 
 - **Errors are problem details** (`application/problem+json`, see
   [API](api.md)): `title`, `status` (an integer) and `detail` instead of `msg`
-  and `status_code` (a string). Clients that read the error body need to
-  change; Pubgrade only reads the status code.
+  and `status_code` (a string), and for requests that don't match the API's
+  schemas, the invalid fields in `errors`. Clients that read the error body
+  need to change; Pubgrade only reads the status code.
 - Errors of the Kubernetes API other than `403` and `404` are answered with
   `500`, as documented, instead of passing on their status (e.g., `503`).
 - Request bodies larger than 64 KiB are rejected with `413`.

@@ -6,10 +6,10 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from flask import Flask
+from foca.errors import BadRequest, Forbidden, InternalServerError, NotFound
 from kubernetes.client.rest import ApiException
 from munch import DefaultMunch
 import pytest
-from werkzeug.exceptions import BadRequest, Forbidden, InternalServerError, NotFound
 
 from pubgrade_sidecar import controllers
 from pubgrade_sidecar.errors.exceptions import ImageRepositoryMismatch
@@ -395,6 +395,7 @@ def test_one_deployment_other_registry(
 ) -> None:
     """Test that images of other registries are rolled out too."""
     image = "harbor.example.org:8443/project/app"
+    monkeypatch.setenv("TARGET_DEPLOYMENTS", "harbor-app")
     monkeypatch.setitem(
         DEPLOYMENTS, "harbor-app", deployment("harbor-app", [f"{image}:1.0"])
     )

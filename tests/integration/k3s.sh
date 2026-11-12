@@ -268,10 +268,21 @@ for ns in "${NAMESPACES[@]}"; do
   expect "status before" '"status":"complete"' "$(report "${ns}")"
   expect "other repository rejected" 409 \
     "$(notify "${ns}" tesk-api other/image "${NEW_TAG}")"
-  # Refused by the Role, whether the Deployment exists (site-a) or not (site-b):
-  # a wider Role would give 404 or 202
-  expect "Deployment outside the Role refused" 403 \
+  # Refused by the sidecar itself (not in `targetDeployments`), before the
+  # Role would refuse it, whether the Deployment exists (site-a) or not
+  # (site-b)
+  expect "Deployment outside the targets refused" 403 \
     "$(notify "${ns}" bystander "${TARGET_REPO}" "${NEW_TAG}")"
+  # Read one by one, which the Role allows: the targets that exist (tesk-worker
+  # only in site-a), without the bystander
+  want='["tesk-api"]'
+  if [[ "${ns}" == site-a ]]; then
+    want='["tesk-api","tesk-worker"]'
+  fi
+  expect "targets listed" 200 "$(call "${ns}" GET /deployment "${TOKEN}")"
+  expect "list of the targets" "|${want}|" \
+    "|$(jq --compact-output sort "${WORK}/body" 2> /dev/null \
+      || cat "${WORK}/body")|"
   expect "notification accepted" 202 \
     "$(notify "${ns}" tesk-api "${TARGET_REPO}" "${NEW_TAG}")"
 done

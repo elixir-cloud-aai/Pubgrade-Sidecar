@@ -12,6 +12,7 @@ import pytest
 
 from pubgrade_sidecar import app as sidecar_app
 from pubgrade_sidecar import controllers
+from pubgrade_sidecar.errors import exceptions
 
 READ = "kubernetes.client.AppsV1Api.read_namespaced_deployment"
 URL = "/deployment/tesk-api"
@@ -101,17 +102,30 @@ def test_kubernetes_errors(client: Any, status: int, code: int) -> None:
 
 
 @pytest.mark.parametrize("status,code", [(404, 404), (403, 403), (503, 500)])
-def test_kubernetes_errors_of_list_and_delete(
-    client: Any, status: int, code: int
-) -> None:
-    """Test that the other calls treat Kubernetes errors the same way."""
+def test_kubernetes_errors_of_list(client: Any, status: int, code: int) -> None:
+    """Test that listing treats Kubernetes errors the same way."""
     error = ApiException(status=status)
     with patch(
         "kubernetes.client.AppsV1Api.list_namespaced_deployment", side_effect=error
     ):
         assert client.get("/deployment", headers=TOKEN).status_code == code
-    with patch("kubernetes.client.CoreV1Api.delete_namespaced_pod", side_effect=error):
-        assert client.delete(URL, headers=TOKEN).status_code == code
+
+
+@pytest.mark.parametrize("path", [URL, "/deployment"])
+def test_delete_not_allowed(client: Any, path: str) -> None:
+    """Test that `DELETE` (removed in API 4.0.0) deletes nothing and gets a 405.
+
+    Args:
+        client: Test client of the app.
+        path: Path of the request.
+    """
+    with patch("kubernetes.client.CoreV1Api.delete_namespaced_pod") as delete_pod:
+        response = client.delete(path, headers=TOKEN)
+    assert response.status_code == 405
+    assert response.content_type == "application/problem+json"
+    assert response.json["status"] == 405
+    assert "DELETE" not in response.headers["Allow"]
+    delete_pod.assert_not_called()
 
 
 def test_notification_accepted(client: Any) -> None:
@@ -176,6 +190,62 @@ def test_errors_are_problem_details(
     assert response.json["title"]
 
 
+def test_invalid_request_names_invalid_fields(client: Any) -> None:
+    """Test that invalid requests name the invalid fields, not their values."""
+    body = {"image_name": "elixircloud/tesk-api", "tag": 123}
+    response = client.put(URL, headers={}, json=body)
+    assert response.status_code == 400
+    assert response.json["detail"] == (
+        "Invalid fields: #/tag (invalid-type); X-Access-Token (required)"
+    )
+    assert [error["code"] for error in response.json["errors"]] == [
+        "invalid-type",
+        "required",
+    ]
+    assert "123" not in response.get_data(as_text=True)
+
+
+def test_unknown_query_parameter_rejected(client: Any) -> None:
+    """Test that unknown query parameters are named as invalid fields."""
+    response = client.put(URL, headers=TOKEN, json=BODY, query_string={"zzz": "1"})
+    assert response.status_code == 400
+    assert response.json["detail"] == "Invalid fields: zzz (unknown-parameter)"
+    assert response.json["errors"] == [
+        {"detail": "Is not allowed.", "parameter": "zzz", "code": "unknown-parameter"}
+    ]
+    cast(MagicMock, controllers._executor).submit.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "method,path,code,detail",
+    [
+        ("GET", "/unknown", 404, "The requested resource wasn't found."),
+        ("POST", URL, 405, "The method is not allowed."),
+    ],
+)
+def test_routing_errors_mapped(
+    client: Any, method: str, path: str, code: int, detail: str
+) -> None:
+    """Test that Flask's routing errors get the mapped problem details.
+
+    Flask raises Werkzeug's classes, which the map covers through those of
+    `foca.errors` that derive from them.
+    """
+    response = client.open(path, method=method, headers=TOKEN)
+    assert response.status_code == code
+    assert response.json["status"] == code
+    assert response.json["detail"] == detail
+
+
+def test_exception_map_without_werkzeug_classes() -> None:
+    """Test that the exception map has no Werkzeug classes.
+
+    FOCA logs them as deprecated; they stop working without Flask.
+    """
+    modules = {cls.__module__ for cls in exceptions.exceptions}
+    assert not any(module.startswith("werkzeug") for module in modules)
+
+
 def test_request_body_size_limited(client: Any) -> None:
     """Test that request bodies larger than the configured limit are refused."""
     body = {"image_name": "x" * 70000, "tag": "1.2.0"}
@@ -219,3 +289,89 @@ def test_notification_for_all_deployments(
         assert client.put("/deployment", headers=TOKEN, json={}).status_code == 400
         other = {**BODY, "image_name": "elixircloud/other"}
         assert client.put("/deployment", headers=TOKEN, json=other).status_code == 404
+
+
+@pytest.mark.parametrize(
+    "image_name",
+    [
+        "elixircloud/tesk-api:1.2.0",
+        "elixircloud/tesk-api@sha256:" + "0" * 64,
+        "registry:5000/org/app:1.2.0",
+    ],
+)
+@pytest.mark.parametrize("url", [URL, "/deployment"])
+def test_notification_with_tag_in_name_rejected(
+    client: Any, image_name: str, url: str
+) -> None:
+    """Test that an image name with a tag or digest gets a 400."""
+    body = {"image_name": image_name, "tag": "1.2.0"}
+    with patch(READ) as read:
+        assert client.put(url, headers=TOKEN, json=body).status_code == 400
+    read.assert_not_called()
+    cast(MagicMock, controllers._executor).submit.assert_not_called()
+
+
+def test_notification_with_registry_port_accepted(client: Any) -> None:
+    """Test that the port of a registry isn't taken for a tag."""
+    image = "registry:5000/org/app"
+    with patch(READ, return_value=deployment(f"{image}:1.0")):
+        response = client.put(
+            URL, headers=TOKEN, json={"image_name": image, "tag": "2.0"}
+        )
+    assert response.status_code == 202
+    assert response.json["image"] == f"{image}:2.0"
+
+
+@pytest.mark.parametrize("method,body,code", [("get", None, 200), ("put", BODY, 202)])
+def test_other_deployments_refused(
+    client: Any, monkeypatch: pytest.MonkeyPatch, method: str, body: Any, code: int
+) -> None:
+    """Test that only the deployments in `TARGET_DEPLOYMENTS` can be used."""
+    monkeypatch.setenv("TARGET_DEPLOYMENTS", "tesk-api, tesk-worker")
+    call = getattr(client, method)
+    with patch(READ, return_value=deployment("elixircloud/tesk-api:1.1.0")) as read:
+        response = call("/deployment/other", headers=TOKEN, json=body)
+        assert response.status_code == 403
+        read.assert_not_called()
+        response = call("/deployment/tesk-worker", headers=TOKEN, json=body)
+        assert response.status_code == code
+        read.assert_called_once()
+
+
+def test_list_limited_to_targets(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that `GET /deployment` lists the deployments in `TARGET_DEPLOYMENTS`.
+
+    They are read one by one (the chart's Role can't list deployments), and
+    those that don't exist are left out; names given twice are read once.
+    """
+    monkeypatch.setenv("TARGET_DEPLOYMENTS", "tesk-api,missing, tesk-api")
+    monkeypatch.delenv("DEPLOYMENT_LABEL", raising=False)
+
+    def read(name: str, namespace: str, **kwargs: Any) -> DefaultMunch:
+        """Read a deployment; `missing` doesn't exist.
+
+        Args:
+            name: Name of the deployment.
+            namespace: Namespace of the deployment.
+            **kwargs: Further arguments of the call.
+
+        Returns:
+            The deployment.
+
+        Raises:
+            ApiException: For `missing`.
+        """
+        if name == "missing":
+            raise ApiException(status=404)
+        found = deployment("elixircloud/tesk-api:1.1.0")
+        found.metadata.name = name
+        return found
+
+    with (
+        patch(READ, side_effect=read),
+        patch("kubernetes.client.AppsV1Api.list_namespaced_deployment") as listed,
+    ):
+        response = client.get("/deployment", headers=TOKEN)
+    assert response.status_code == 200
+    assert response.json == ["tesk-api"]
+    listed.assert_not_called()

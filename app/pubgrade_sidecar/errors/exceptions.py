@@ -1,18 +1,17 @@
 """Errors of the API and the responses that FOCA returns for them."""
 
-from connexion.exceptions import (
-    BadRequestProblem,
-    ExtraParameterProblem,
-    UnsupportedMediaTypeProblem,
-)
-from werkzeug.exceptions import (
+# `UnsupportedMediaTypeProblem` has no counterpart in `foca.errors` yet
+from connexion.exceptions import UnsupportedMediaTypeProblem
+from foca.errors import (
     BadRequest,
     Conflict,
+    ExtraParameterProblem,
     Forbidden,
     InternalServerError,
     MethodNotAllowed,
     NotFound,
-    RequestEntityTooLarge,
+    PayloadTooLarge,
+    RequestValidationProblem,
     Unauthorized,
 )
 
@@ -35,7 +34,9 @@ class ImageRepositoryMismatch(Conflict):
 
 # Problem details (RFC 9457) of the exceptions, by class (`exceptions.mapping`
 # in the configuration); exceptions that aren't listed get those of their
-# closest listed base class
+# closest listed base class. The classes of `foca.errors` also cover the
+# Werkzeug classes they derive from, e.g., Flask's `NotFound` for unknown
+# paths
 exceptions = {
     Exception: {
         "title": "Internal Server Error",
@@ -47,7 +48,7 @@ exceptions = {
         "status": 400,
         "detail": "The request is invalid.",
     },
-    BadRequestProblem: {
+    RequestValidationProblem: {
         "title": "Bad Request",
         "status": 400,
         "detail": "The request is invalid.",
@@ -87,7 +88,7 @@ exceptions = {
         "status": 500,
         "detail": "An unexpected error occurred.",
     },
-    RequestEntityTooLarge: {
+    PayloadTooLarge: {
         "title": "Content Too Large",
         "status": 413,
         "detail": "The request body is larger than the configured limit.",
