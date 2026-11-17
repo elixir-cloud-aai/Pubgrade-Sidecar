@@ -124,10 +124,18 @@ workflow: its release-prep pull request moved the app from 0.1.0 to it.
    (`python scripts/citation.py set <version>`, which also sets the release
    date), run `uv lock`, and add the curated release notes
    `docs/releases/<version>.md` (see below), also to the `nav` of
-   `mkdocs.yml` (section "Releases").
-2. Once CI has passed for its commit on `dev`, check the notes
-   (`python scripts/release_notes.py require <version>` and
-   `python scripts/release_notes.py check docs/releases/<version>.md`) and
+   `mkdocs.yml`, newest first, in the section "Releases" before
+   "Code reference" (the first notes add it):
+
+   ```yaml
+   - Releases:
+       - "0.3.0": releases/0.3.0.md
+   ```
+2. Once CI has passed for its commit on `dev`, check the notes, as the
+   release workflow does after the tag (a failure there needs a new version):
+   `python scripts/release_notes.py require <version>`,
+   `! grep -n TODO docs/releases/<version>.md` and
+   `python scripts/release_notes.py check docs/releases/<version>.md`. Then
    bring that commit to `main`.
 3. Tag it on `main` with a signed, annotated tag and push the tag:
    `git tag -s v<version> -m v<version>`, then
@@ -159,10 +167,13 @@ organization:
 
 The curated notes in `docs/releases/<version>.md` hold parts 1 and 2,
 without a title (the release's title is its tag). The release body never
-changes, so they link with full URLs to the release's docs
-(`https://pubgrade.readthedocs.io/en/v<version>/sidecar/...`) and files
-(`blob/v<version>/`), never to versions that move (`latest`, `dev`) and
-never with relative links, which don't work in the release body. The release
+changes, so they link with full URLs to the release's files, docs included
+(`https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/blob/v<version>/docs/...`),
+never to versions that move (`latest`, `dev`) and never with relative links,
+which don't work in the release body. They don't link the docs on Read the
+Docs: those are a section of Pubgrade's, versioned by Pubgrade's releases,
+which show the Sidecar commit that Pubgrade's submodule pins, so a version of
+them with the Sidecar's version may not exist or may show another one. The release
 workflow fails if the notes contain `TODO`, aren't in this format, or are
 missing once any release has curated notes (`scripts/release_notes.py`); the
 unit tests check all notes in `docs/releases/` too. The workflow adds parts 3
@@ -171,8 +182,11 @@ release before it), `scripts/release_notes.py first` builds them instead,
 because without a previous tag GitHub starts at an older tag of its own
 choice. The notes of immutable releases stay editable, their assets don't, so
 the release is created as a draft, gets its assets and is published last
-(`scripts/release_assets.py`); a re-run of failed jobs finishes it. Don't
-re-run all jobs of a release that was published: that builds a new image
+(`scripts/release_assets.py`); a re-run of failed jobs finishes it. A re-run
+also replaces the notes of a published release with the curated ones (and
+freshly generated ones), so fix notes in `docs/releases/<version>.md`, not
+by hand in the release. Don't re-run all jobs of a release that was
+published: that builds a new image
 digest and moves the release's image tags to it before it fails at the
 release.
 
