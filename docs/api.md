@@ -120,12 +120,12 @@ With the chart values `refuseDowngrades` and `allowedTags` (since version
 answer 409 for a tag that doesn't match `allowedTags` (`"detail": "The
 sidecar's settings don't allow this tag; nothing changed."`), and, with
 `refuseDowngrades`, for a tag that isn't a higher version than that of each
-container it would change, or than that of a delivery that still waits for
-its image (`"detail": "The tag isn't an upgrade of the deployment's; nothing
+container it would change, or neither the tag of a delivery that still waits
+for its image nor a higher version (`"detail": "The tag isn't an upgrade of the deployment's; nothing
 changed."`). A notification refused this way doesn't end a delivery that
-still waits for its image. If a deployment
-gets a higher version while a delivery waits, the delivery fails with this
-`detail` instead of patching it back.
+still waits for its image. If a deployment gets a higher version while a
+delivery waits, the delivery fails instead of patching it back, and the status
+report's `detail` is the same text.
 
 Since version 3.0.0 of the API, errors are
 [problem details](https://www.rfc-editor.org/rfc/rfc9457)

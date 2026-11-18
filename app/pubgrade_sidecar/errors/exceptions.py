@@ -15,6 +15,10 @@ from foca.errors import (
     Unauthorized,
 )
 
+# Explanation of a refused downgrade (`DowngradeRefused`), in the response and
+# in the status report of a delivery that the check before its patch refuses
+DOWNGRADE_DETAIL = "The tag isn't an upgrade of the deployment's; nothing changed."
+
 
 class ImageUnavailable(NotFound):
     """Raised when the image of a notification isn't in its registry.
@@ -41,11 +45,6 @@ class DowngradeRefused(Conflict):
     """
 
     pass
-
-
-# Explanation of a refused downgrade, in the response and in the status
-# report of a delivery that the check before its patch refuses
-DOWNGRADE_DETAIL = "The tag isn't an upgrade of the deployment's; nothing changed."
 
 
 class TagNotAllowed(Conflict):

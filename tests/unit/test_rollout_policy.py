@@ -250,6 +250,11 @@ def test_upgrade_rolls_out(
         ("1.2.0", "1.2.0-1"),
         ("1.2.0", "1.2.0-r1"),
         ("1.2.0", "1.2.0-post1"),
+        # Post-releases spelled otherwise than `.postN`
+        ("1.2.0", "1.2.0_r1"),
+        ("1.2.0", "1.2.0.r1"),
+        ("1.2.0", "1.2.0post1"),
+        ("1.2.0", "1.2.0_post1"),
         # The same version, spelled otherwise; from a floating tag (`1.2`,
         # maybe 1.2.9 by now) to a release that may be older
         ("1.2.0", "v1.2.0"),
@@ -487,6 +492,32 @@ def test_waiting_delivery_not_undercut(
             assert controllers._deliveries[("tesk-api", REPOSITORY)] is waiting
         else:
             assert notify(app, tag)[1] == code
+
+
+@patch(PATCH)
+@patch(CHECK, return_value=True)
+def test_waiting_delivery_refuses_all_deployments(
+    mock_check: MagicMock,
+    mock_patch: MagicMock,
+    app: Flask,
+    refuse: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that undercutting one waiting delivery starts and ends none."""
+    executor = DeferredExecutor()
+    monkeypatch.setattr(controllers, "_executor", executor)
+    deployments = {
+        "tesk-api": deployment("tesk-api", [f"{REPOSITORY}:1.1.0"]),
+        "tesk-worker": deployment("tesk-worker", [f"{REPOSITORY}:1.0.0"]),
+    }
+    with patch(READ, new=reader(deployments)):
+        assert notify_one(app, "2.0.0")[1] == 202
+        waiting = controllers._deliveries[("tesk-api", REPOSITORY)]
+        # tesk-worker would upgrade, but tesk-api has 2.0.0 waiting
+        with pytest.raises(DowngradeRefused):
+            notify_all(app, "1.1.0")
+    assert controllers._deliveries == {("tesk-api", REPOSITORY): waiting}
+    assert len(executor.pending) == 1
 
 
 @patch(PATCH, return_value=deployment("tesk-api", []))
