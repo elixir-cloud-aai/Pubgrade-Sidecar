@@ -193,8 +193,10 @@ default, and a notification they refuse changes nothing and gets a 409:
 - `refuseDowngrades: true` (environment variable `REFUSE_DOWNGRADES=true`)
   rolls out only upgrades: a notification's tag must be a higher version than
   the current tag of every container it would change. In a `PUT /deployment`
-  for all deployments, one container that it wouldn't upgrade refuses the
-  whole notification, so no deployment rolls out.
+  for all deployments, one container that it wouldn't upgrade when the
+  notification arrives refuses the whole notification, so no deployment rolls
+  out; a deployment that changes later, while the deliveries wait, fails only
+  its own delivery (see below), and the others still get their upgrades.
     - **Comparison:** tags are compared as versions by
       [PEP 440](https://peps.python.org/pep-0440/), which also reads SemVer
       pre-releases (`1.2.0-rc.1` as `1.2.0rc1`) and allows a leading `v`:
@@ -240,7 +242,10 @@ default, and a notification they refuse changes nothing and gets a 409:
 
   Other tags are refused before the sidecar reads any deployment. A pattern
   that isn't a regular expression refuses every notification (with a 500),
-  and the sidecar logs an error.
+  and the sidecar logs an error. The pattern is matched against every
+  notification's tag (at most 128 characters), without a time limit: keep it
+  simple, without nested repetitions such as `([0-9]+)+`, which can take very
+  long on some tags.
 
 Turn on both: `refuseDowngrades` alone accepts any tag that reads as a
 higher version with as many segments, e.g., an old image tagged `2023.01.0`
