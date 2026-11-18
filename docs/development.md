@@ -173,7 +173,8 @@ never to versions that move (`latest`, `dev`) and never with relative links,
 which don't work in the release body. They don't link the docs on Read the
 Docs: those are a section of Pubgrade's, versioned by Pubgrade's releases,
 which show the Sidecar commit that Pubgrade's submodule pins, so a version of
-them with the Sidecar's version may not exist or may show another one. The release
+them with the Sidecar's version may not exist or may show another one. The notes must be
+a regular file (not a symbolic link). The release
 workflow fails if the notes contain `TODO`, aren't in this format, or are
 missing once any release has curated notes (`scripts/release_notes.py`); the
 unit tests check all notes in `docs/releases/` too. The workflow adds parts 3
