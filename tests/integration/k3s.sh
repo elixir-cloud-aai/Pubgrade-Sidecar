@@ -4,8 +4,9 @@
 # sends notifications and checks that the target Deployments roll out to the
 # new tag and that the status reports it. The chart's minimal Role applies in
 # both namespaces; in the second one, the sidecar also runs as an arbitrary
-# user ID with group 0, as on OpenShift, and its target Deployment spells the
-# image with the `docker.io/` prefix. In the first one, a notification for all
+# user ID with group 0, as on OpenShift, its target Deployment spells the
+# image with the `docker.io/` prefix, and the chart's `allowedTags` refuses
+# tags unlike the new one. In the first one, a notification for all
 # Deployments of an image repository also updates a Deployment with several
 # containers, and the check of deployed instances (`tests/check_deployment.sh`)
 # runs against its sidecar.
@@ -245,13 +246,19 @@ jq --null-input --arg a "${TARGET_REPO}:${OLD_TAG}" \
 
 echo "== install the chart"
 for ns in "${NAMESPACES[@]}"; do
+  # In site-b, only tags like the new one are allowed (`--set` drops
+  # backslashes, hence the brackets)
+  policy=()
+  if [[ "${ns}" == site-b ]]; then
+    policy=(--set 'allowedTags=1[.][0-9]+-alpine')
+  fi
   helm install sidecar "${ROOT}/deployment" --namespace "${ns}" \
     --set 'targetDeployments[0]=tesk-api' \
     --set 'targetDeployments[1]=tesk-worker' \
     --set accessToken.existingSecret=sidecar-token \
     --set image.repository="${IMAGE_REPOSITORY}" \
     --set image.tag="${IMAGE_TAG}" \
-    --set image.pullPolicy=Never > /dev/null
+    --set image.pullPolicy=Never "${policy[@]}" > /dev/null
 done
 # In site-b, an arbitrary user ID with group 0, as OpenShift assigns them. The
 # Deployment is patched after the install, as OpenShift sets the user after
@@ -294,6 +301,10 @@ for ns in "${NAMESPACES[@]}"; do
   # (site-b)
   expect "Deployment outside the targets refused" 403 \
     "$(notify "${ns}" bystander "${TARGET_REPO}" "${NEW_TAG}")"
+  if [[ "${ns}" == site-b ]]; then
+    expect "tag outside allowedTags refused" 409 \
+      "$(notify "${ns}" tesk-api "${TARGET_REPO}" latest)"
+  fi
   # Read one by one, which the Role allows: the targets that exist (tesk-worker
   # only in site-a), without the bystander
   want='["tesk-api"]'

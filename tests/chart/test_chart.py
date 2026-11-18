@@ -89,6 +89,8 @@ def render(*settings: str) -> dict[str, dict[str, Any]]:
         ([*REQUIRED[1:], "targetDeployments[0]=123"], "targetDeployments"),
         ([*REQUIRED, "podSecurityContext.seccompProfile=false"], "seccompProfile"),
         ([*REQUIRED, "securityContext.seccompProfile=false"], "seccompProfile"),
+        ([*REQUIRED, "refuseDowngrades=yes"], "refuseDowngrades"),
+        ([*REQUIRED, "allowedTags=1"], "allowedTags"),
     ],
 )
 def test_incomplete_values_fail(settings: list[str], message: str) -> None:
@@ -265,6 +267,24 @@ def test_no_label_by_default() -> None:
     """Test that without a label, all target deployments count."""
     container = render()["Deployment"]["spec"]["template"]["spec"]["containers"][0]
     assert "DEPLOYMENT_LABEL" not in {variable["name"] for variable in container["env"]}
+
+
+def test_rollout_policy_reaches_sidecar() -> None:
+    """Test that the sidecar gets the refusal of downgrades and the tag pattern."""
+    # `--set` drops backslashes, so the pattern has none
+    container = render(
+        "refuseDowngrades=true", "allowedTags=^[0-9]+[.][0-9]+[.][0-9]+$"
+    )["Deployment"]["spec"]["template"]["spec"]["containers"][0]
+    variables = {variable["name"]: variable for variable in container["env"]}
+    assert variables["REFUSE_DOWNGRADES"]["value"] == "true"
+    assert variables["ALLOWED_TAGS"]["value"] == "^[0-9]+[.][0-9]+[.][0-9]+$"
+
+
+def test_no_rollout_policy_by_default() -> None:
+    """Test that by default, any tag rolls out, as before."""
+    container = render()["Deployment"]["spec"]["template"]["spec"]["containers"][0]
+    names = {variable["name"] for variable in container["env"]}
+    assert not names & {"REFUSE_DOWNGRADES", "ALLOWED_TAGS"}
 
 
 def test_registry_credentials_mounted_from_secret() -> None:

@@ -32,6 +32,23 @@ class ImageRepositoryMismatch(Conflict):
     pass
 
 
+class DowngradeRefused(Conflict):
+    """Raised when a notification would roll a container back.
+
+    Only with `REFUSE_DOWNGRADES`: its tag isn't a version at least as high as
+    the current tag of each container it would change, or one of these tags
+    isn't a version.
+    """
+
+    pass
+
+
+class TagNotAllowed(Conflict):
+    """Raised when the tag of a notification doesn't match `ALLOWED_TAGS`."""
+
+    pass
+
+
 # Problem details (RFC 9457) of the exceptions, by class (`exceptions.mapping`
 # in the configuration); exceptions that aren't listed get those of their
 # closest listed base class. The classes of `foca.errors` also cover the
@@ -77,6 +94,19 @@ exceptions = {
         "title": "Conflict",
         "status": 409,
         "detail": "The deployment uses another image repository.",
+    },
+    DowngradeRefused: {
+        "title": "Conflict",
+        "status": 409,
+        "detail": (
+            "The tag isn't a version at least as high as the deployment's; "
+            "nothing changed."
+        ),
+    },
+    TagNotAllowed: {
+        "title": "Conflict",
+        "status": 409,
+        "detail": "The sidecar's settings don't allow this tag; nothing changed.",
     },
     Unauthorized: {
         "title": "Unauthorized",

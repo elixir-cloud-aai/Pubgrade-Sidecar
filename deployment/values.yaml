@@ -18,6 +18,18 @@ targetDeployments: []
 # then updates only those of the `targetDeployments` that have it
 deploymentLabel: ""
 
+# Optional: refuse notifications that would roll a container back to a lower
+# version (answered with 409, nothing changes). Tags are compared as versions
+# (PEP 440, which reads SemVer pre-releases too, e.g., `1.2.0-rc.1`); while
+# on, tags that aren't versions, e.g., `latest`, are refused, and so are
+# notifications for containers whose current tag isn't one, or that have none
+refuseDowngrades: false
+
+# Optional: a regular expression (Python syntax) that the whole tag of a
+# notification must match, e.g., `[0-9]+\.[0-9]+\.[0-9]+` for stable releases
+# only; other tags are answered with 409. Empty: any tag
+allowedTags: ""
+
 # Required: an existing Secret with the access token, which callers send as
 # `X-Access-Token`. Create it yourself, so that the token stays out of values
 # files, e.g.:
