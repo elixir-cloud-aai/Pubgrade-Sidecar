@@ -33,14 +33,19 @@ class ImageRepositoryMismatch(Conflict):
 
 
 class DowngradeRefused(Conflict):
-    """Raised when a notification would roll a container back.
+    """Raised when a notification isn't an upgrade.
 
-    Only with `REFUSE_DOWNGRADES`: its tag isn't a version at least as high as
-    the current tag of each container it would change, or one of these tags
-    isn't a version.
+    Only with `REFUSE_DOWNGRADES`: its tag isn't a higher version than the
+    current tag of each container it would change, or than the tag of a
+    delivery that still waits, or one of these tags isn't a version.
     """
 
     pass
+
+
+# Explanation of a refused downgrade, in the response and in the status
+# report of a delivery that the check before its patch refuses
+DOWNGRADE_DETAIL = "The tag isn't an upgrade of the deployment's; nothing changed."
 
 
 class TagNotAllowed(Conflict):
@@ -98,10 +103,7 @@ exceptions = {
     DowngradeRefused: {
         "title": "Conflict",
         "status": 409,
-        "detail": (
-            "The tag isn't a version at least as high as the deployment's; "
-            "nothing changed."
-        ),
+        "detail": DOWNGRADE_DETAIL,
     },
     TagNotAllowed: {
         "title": "Conflict",

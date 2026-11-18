@@ -191,18 +191,22 @@ them. Two settings limit what a notification can roll out; both are off by
 default, and a notification they refuse changes nothing and gets a 409:
 
 - `refuseDowngrades: true` (environment variable `REFUSE_DOWNGRADES=true`)
-  refuses a notification whose tag is a lower version than the current tag of
-  any container it would change. In a `PUT /deployment` for all deployments,
-  one such container refuses the whole notification, so no deployment rolls
-  out. Tags are compared as versions by
-  [PEP 440](https://peps.python.org/pep-0440/), which also reads SemVer
-  pre-releases (`1.2.0-rc.1` as `1.2.0rc1`) and allows a leading `v`:
-  `1.2.0rc1` is lower than `1.2.0`, `1.10.0` higher than `1.9.0`, and `v1.2.0`
-  the same version as `1.2.0` (which rolls out, as it is no downgrade). While
-  the setting is on, the sidecar also refuses tags that aren't versions
-  (e.g., `latest`, `dev`, `sha-<commit>` or `1.2.0-alpine`), post-releases
-  written with a hyphen (`1.2.0-1`, `1.2.0-r1`), which SemVer reads as
-  pre-releases and PEP 440 as later releases, and notifications for
+  rolls out only upgrades: a notification's tag must be a higher version than
+  the current tag of every container it would change. In a `PUT /deployment`
+  for all deployments, one container that it wouldn't upgrade refuses the
+  whole notification, so no deployment rolls out. Tags are compared as
+  versions by [PEP 440](https://peps.python.org/pep-0440/), which also reads
+  SemVer pre-releases (`1.2.0-rc.1` as `1.2.0rc1`) and allows a leading `v`:
+  `1.2.0rc1` is lower than `1.2.0`, and `1.10.0` higher than `1.9.0`. Both
+  tags must have the same number of release segments: `1.2.0` to `1.3.0`, or
+  `1.2` to `1.3`, but not `1.2` to `1.2.0` (a tag like `1.2` often moves
+  along its patch releases, so `1.2.0` may be older) or `1.2.0` to
+  `20230101` (a build number or date, or a commit hash of digits, reads as
+  a very high version). The same version spelled otherwise (`v1.2.0` after
+  `1.2.0`) isn't an upgrade either. The sidecar also refuses tags that aren't
+  versions (e.g., `latest`, `dev`, `sha-<commit>` or `1.2.0-alpine`),
+  post-releases written with a hyphen (`1.2.0-1`, `1.2.0-r1`), which SemVer
+  reads as pre-releases and PEP 440 as later releases, and notifications for
   containers whose current tag isn't a version, or that have no tag (only a
   digest, or none, which means `latest`). So pin the target containers to
   version tags before turning it on. A digest next to the tag
@@ -210,10 +214,13 @@ default, and a notification they refuse changes nothing and gets a 409:
   with the deployment as it is, both when the notification arrives and again
   right before its patch: a deployment that got a higher version while the
   delivery waited for its image isn't patched back, and the delivery fails
-  (see [API](api.md)). `true`, `1`, `yes` and `on` turn it on, and `false`,
-  `0`, `no`, `off` and an empty value leave it off (in any case); any other
-  value turns it on too, so that a typo doesn't allow downgrades, and the
-  sidecar logs an error.
+  (see [API](api.md)). A notification also can't undercut a delivery that
+  still waits for its image: unless it names the same tag or an upgrade of
+  it, it is refused, so that, e.g., a notification of the current tag
+  doesn't cancel a waiting release. `true`, `1`, `yes` and `on` turn it on,
+  and `false`, `0`, `no`, `off` and an empty value leave it off (in any
+  case); any other value turns it on too, so that a typo doesn't allow
+  downgrades, and the sidecar logs an error.
 - `allowedTags` (environment variable `ALLOWED_TAGS`) is a regular expression
   (Python syntax) that the whole tag must match, e.g., stable releases only:
 
@@ -226,10 +233,12 @@ default, and a notification they refuse changes nothing and gets a 409:
   that isn't a regular expression refuses every notification (with a 500),
   and the sidecar logs an error.
 
-For services that should only ever move forward to stable releases, turn on
-both. They don't stop a holder of a token from rolling out a higher version
-that is in the registry; they keep old, still published images, and tags
-that move (such as `latest`), out of the deployments.
+Turn on both: `refuseDowngrades` alone accepts any tag that reads as a
+higher version with as many segments, e.g., an old image tagged `2023.01`
+after `2.5.0`, so name the tags of your releases in `allowedTags`. Together,
+they don't stop a holder of a token from rolling out a higher release that
+is in the registry; they keep old, still published images, and tags that
+move (such as `latest`), out of the deployments.
 
 ## Resources
 

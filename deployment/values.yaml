@@ -18,11 +18,13 @@ targetDeployments: []
 # then updates only those of the `targetDeployments` that have it
 deploymentLabel: ""
 
-# Optional: refuse notifications that would roll a container back to a lower
-# version (answered with 409, nothing changes). Tags are compared as versions
-# (PEP 440, which reads SemVer pre-releases too, e.g., `1.2.0-rc.1`); while
-# on, tags that aren't versions, e.g., `latest`, are refused, and so are
-# notifications for containers whose current tag isn't one, or that have none
+# Optional: roll out only upgrades; other notifications are answered with 409,
+# and nothing changes. A tag must be a higher version, with as many release
+# segments, than the current tag of each container it changes (PEP 440, which
+# reads SemVer pre-releases too, e.g., `1.2.0-rc.1`). While on, tags that
+# aren't versions, e.g., `latest`, are refused, and so are notifications for
+# containers whose current tag isn't one, or that have none. Use it with
+# `allowedTags` (see docs/deployment.md, "Refusing downgrades")
 refuseDowngrades: false
 
 # Optional: a regular expression (Python syntax) that the whole tag of a

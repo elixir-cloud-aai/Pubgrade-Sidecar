@@ -11,7 +11,11 @@ from munch import DefaultMunch
 import pytest
 
 from pubgrade_sidecar import controllers
-from pubgrade_sidecar.errors.exceptions import DowngradeRefused, TagNotAllowed
+from pubgrade_sidecar.errors.exceptions import (
+    DOWNGRADE_DETAIL,
+    DowngradeRefused,
+    TagNotAllowed,
+)
 
 TOKEN = "test-token"
 READ = "kubernetes.client.AppsV1Api.read_namespaced_deployment"
@@ -203,9 +207,9 @@ def reader(deployments: dict[str, DefaultMunch]) -> Any:
         ("1.9.0", "1.10.0"),
         # Post-releases spelled unambiguously
         ("1.1.0", "1.1.0.post1"),
-        # The same version, spelled otherwise
-        ("1.1.0", "v1.1.0"),
-        ("1.1", "1.1.0"),
+        # Floating tags of the same kind
+        ("1.1", "1.2"),
+        ("1", "2"),
         # A digest next to the tag doesn't count
         (f"1.1.0@{DIGEST}", "1.2.0"),
     ],
@@ -220,7 +224,7 @@ def test_upgrade_rolls_out(
     current: str,
     tag: str,
 ) -> None:
-    """Test that a higher or equal version rolls out."""
+    """Test that a higher version rolls out."""
     deployments = {"tesk-api": deployment("tesk-api", [f"{REPOSITORY}:{current}"])}
     with patch(READ, new=reader(deployments)):
         _, code = notify_one(app, tag)
@@ -246,6 +250,20 @@ def test_upgrade_rolls_out(
         ("1.2.0", "1.2.0-1"),
         ("1.2.0", "1.2.0-r1"),
         ("1.2.0", "1.2.0-post1"),
+        # The same version, spelled otherwise; from a floating tag (`1.2`,
+        # maybe 1.2.9 by now) to a release that may be older
+        ("1.2.0", "v1.2.0"),
+        ("1.2.0", "01.2.0"),
+        ("1.2", "1.2.0"),
+        ("1", "1.0.0"),
+        ("1.2.0", "1.2.0.0"),
+        # Other numbers of release segments: build numbers, dates, short
+        # commit hashes that read as versions
+        ("2.5.0", "20230101"),
+        ("2.5.0", "2023.01"),
+        ("2.5.0", "12345a6"),
+        ("2.5.0", "1234567"),
+        ("1.2", "1.3.0"),
         # Tags that aren't versions
         ("1.2.0", "latest"),
         ("1.2.0", "dev"),
@@ -429,6 +447,82 @@ def test_refused_notification_keeps_waiting_delivery(
     assert applied == [f"{REPOSITORY}:1.2.0"]
 
 
+@pytest.mark.parametrize(
+    "tag,code",
+    [
+        # The current tag would end the waiting delivery, a version between
+        # them would replace it
+        ("1.1.0", None),
+        ("1.1.1", None),
+        ("v2.0.0", None),
+        # The waiting tag again, or a higher one, may replace it
+        ("2.0.0", 202),
+        ("2.0.1", 202),
+    ],
+)
+@pytest.mark.parametrize("notify", [notify_one, notify_all])
+@patch(PATCH)
+@patch(CHECK, return_value=True)
+def test_waiting_delivery_not_undercut(
+    mock_check: MagicMock,
+    mock_patch: MagicMock,
+    app: Flask,
+    refuse: None,
+    monkeypatch: pytest.MonkeyPatch,
+    notify: Any,
+    tag: str,
+    code: int | None,
+) -> None:
+    """Test that a notification can't cancel or shrink a waiting upgrade."""
+    monkeypatch.setenv("TARGET_DEPLOYMENTS", "tesk-api")
+    executor = DeferredExecutor()
+    monkeypatch.setattr(controllers, "_executor", executor)
+    deployments = {"tesk-api": deployment("tesk-api", [f"{REPOSITORY}:1.1.0"])}
+    with patch(READ, new=reader(deployments)):
+        assert notify_one(app, "2.0.0")[1] == 202
+        waiting = controllers._deliveries[("tesk-api", REPOSITORY)]
+        if code is None:
+            with pytest.raises(DowngradeRefused):
+                notify(app, tag)
+            assert controllers._deliveries[("tesk-api", REPOSITORY)] is waiting
+        else:
+            assert notify(app, tag)[1] == code
+
+
+@patch(PATCH, return_value=deployment("tesk-api", []))
+@patch(CHECK, return_value=True)
+def test_finished_delivery_not_compared(
+    mock_check: MagicMock,
+    mock_patch: MagicMock,
+    app: Flask,
+    refuse: None,
+) -> None:
+    """Test that only a delivery that still waits counts, not a failed one."""
+    controllers._deliveries[("tesk-api", REPOSITORY)] = controllers._Delivery(
+        image=f"{REPOSITORY}:3.0.0", state="failed", detail="Image not available."
+    )
+    deployments = {"tesk-api": deployment("tesk-api", [f"{REPOSITORY}:1.1.0"])}
+    with patch(READ, new=reader(deployments)):
+        assert notify_one(app, "1.2.0")[1] == 202
+
+
+@patch(PATCH, return_value=deployment("tesk-api", []))
+@patch(CHECK, return_value=True)
+def test_waiting_delivery_ignored_by_default(
+    mock_check: MagicMock,
+    mock_patch: MagicMock,
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that without the setting, a newer notification replaces any other."""
+    monkeypatch.setattr(controllers, "_executor", DeferredExecutor())
+    deployments = {"tesk-api": deployment("tesk-api", [f"{REPOSITORY}:1.1.0"])}
+    with patch(READ, new=reader(deployments)):
+        assert notify_one(app, "2.0.0")[1] == 202
+        assert notify_one(app, "1.1.0")[1] == 200
+    assert not controllers._deliveries
+
+
 @patch(PATCH)
 @patch(CHECK, return_value=True)
 def test_upgraded_during_the_wait_fails_the_delivery(
@@ -451,7 +545,7 @@ def test_upgraded_during_the_wait_fails_the_delivery(
     mock_patch.assert_not_called()
     assert report["status"] == "failed"
     assert report["requested_image"] == f"{REPOSITORY}:1.2.0"
-    assert "at least as high" in report["detail"]
+    assert report["detail"] == DOWNGRADE_DETAIL
 
 
 @pytest.mark.parametrize(

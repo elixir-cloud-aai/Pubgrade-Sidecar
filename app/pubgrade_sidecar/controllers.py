@@ -21,6 +21,7 @@ from packaging.version import InvalidVersion, Version
 import requests
 
 from pubgrade_sidecar.errors.exceptions import (
+    DOWNGRADE_DETAIL,
     BadRequest,
     DowngradeRefused,
     Forbidden,
@@ -428,8 +429,9 @@ def updateDeployment(deployment_name: str) -> tuple[Response, int]:
         ImageRepositoryMismatch: If no container of the deployment uses the
             repository.
         TagNotAllowed: If the tag doesn't match `ALLOWED_TAGS`.
-        DowngradeRefused: With `REFUSE_DOWNGRADES`, if a container would get
-            a lower version, or a tag that isn't one (see `_check_upgrade`).
+        DowngradeRefused: With `REFUSE_DOWNGRADES`, if the tag isn't an
+            upgrade of each container it would change (see `_check_upgrade`),
+            or would undercut a waiting delivery (see `_check_waiting`).
         InternalServerError: If `ALLOWED_TAGS` isn't a regular expression.
     """
     _check_token()
@@ -440,6 +442,7 @@ def updateDeployment(deployment_name: str) -> tuple[Response, int]:
     if plan is None:
         raise ImageRepositoryMismatch
     image, changes = plan
+    _check_waiting(deployment_name, image_repo, image_tag)
     if not _start_delivery(deployment_name, image, image_repo, image_tag, changes):
         return jsonify(
             {"message": "Deployment already uses this image.", "image": image}
@@ -472,9 +475,10 @@ def updateDeployments() -> tuple[Response, int]:
         NotFound: If no container of these deployments uses the repository.
         Forbidden: If the sidecar has no right to read the deployments.
         TagNotAllowed: If the tag doesn't match `ALLOWED_TAGS`.
-        DowngradeRefused: With `REFUSE_DOWNGRADES`, if a container of any of
-            the deployments would get a lower version, or a tag that isn't
-            one; then no deployment rolls out.
+        DowngradeRefused: With `REFUSE_DOWNGRADES`, if the tag isn't an
+            upgrade of each container it would change in any of the
+            deployments, or would undercut a waiting delivery of any of them;
+            then no deployment rolls out.
         InternalServerError: If `ALLOWED_TAGS` isn't a regular expression.
     """
     _check_token()
@@ -483,6 +487,7 @@ def updateDeployments() -> tuple[Response, int]:
     for deployment in _managed_deployments():
         plan = _plan_update(deployment, image_repo, image_tag)
         if plan is not None:
+            _check_waiting(deployment.metadata.name, image_repo, image_tag)
             plans.append((deployment.metadata.name, *plan))
     if not plans:
         raise NotFound
@@ -597,8 +602,33 @@ def _version(tag: str | None) -> Version | None:
     return version
 
 
+def _is_upgrade(old_tag: str | None, new_tag: str) -> bool:
+    """Tell whether a new tag is a higher version than an old one.
+
+    Both must be versions (see `_version`) with the same number of release
+    segments, e.g., `1.2.0` and `1.3.0`, not `1.2` and `1.2.0` (a tag like
+    `1.2` often moves along its patch releases, so `1.2.0` may be older) or
+    `1.2.0` and `20230101` (a build number or a date). The new version must
+    be higher; the same version spelled otherwise (`v1.2.0`) is no upgrade.
+
+    Args:
+        old_tag: Current tag, if any.
+        new_tag: Tag of the notification.
+
+    Returns:
+        Whether the new tag is an upgrade.
+    """
+    old, new = _version(old_tag), _version(new_tag)
+    return (
+        old is not None
+        and new is not None
+        and len(old.release) == len(new.release)
+        and new > old
+    )
+
+
 def _check_upgrade(changes: list[tuple[int, str, str]], image_tag: str) -> None:
-    """Check that changes of containers are no downgrades.
+    """Check that changes of containers are upgrades.
 
     Args:
         changes: Containers to change, each with its index, its current and
@@ -606,17 +636,46 @@ def _check_upgrade(changes: list[tuple[int, str, str]], image_tag: str) -> None:
         image_tag: Tag of the notification.
 
     Raises:
-        DowngradeRefused: If the tag isn't a version, or any container to
-            change has no tag that is a version at most as high (see
-            `_version`); a digest next to the tag doesn't count.
+        DowngradeRefused: If the tag isn't an upgrade (see `_is_upgrade`) of
+            the current tag of each container to change. A digest next to a
+            tag doesn't count.
     """
-    if not changes:
-        return
-    new = _version(image_tag)
     for _, old_image, _ in changes:
-        old = _version(_parse_image(old_image)[1])
-        if new is None or old is None or new < old:
+        if not _is_upgrade(_parse_image(old_image)[1], image_tag):
             raise DowngradeRefused
+
+
+def _check_waiting(deployment_name: str, image_repo: str, image_tag: str) -> None:
+    """Check that a notification doesn't undercut a delivery that waits.
+
+    With `REFUSE_DOWNGRADES`, a notification that would end or replace a
+    delivery of the same deployment and repository that still waits for its
+    image must name that delivery's tag or an upgrade of it (see
+    `_is_upgrade`); otherwise, e.g., a notification of the current tag
+    could cancel a waiting security release.
+
+    Args:
+        deployment_name: Name of the deployment.
+        image_repo: Canonical repository of the image.
+        image_tag: Tag of the notification.
+
+    Raises:
+        DowngradeRefused: If the notification would undercut such a delivery.
+    """
+    if not _refuse_downgrades():
+        return
+    with _lock:
+        delivery = _deliveries.get((deployment_name, image_repo))
+        waiting = (
+            delivery.image
+            if delivery is not None and delivery.state == "waiting_for_image"
+            else None
+        )
+    if waiting is None:
+        return
+    waiting_tag = _parse_image(waiting)[1]
+    if waiting_tag != image_tag and not _is_upgrade(waiting_tag, image_tag):
+        raise DowngradeRefused
 
 
 def _managed_deployments() -> list[Any]:
@@ -859,11 +918,7 @@ def _deliver(
     except DowngradeRefused:
         # The deployment got a higher version during the wait
         logger.warning("Delivery refused, as it would be a downgrade.")
-        _fail(
-            delivery,
-            "The tag isn't a version at least as high as the deployment's; "
-            "nothing changed.",
-        )
+        _fail(delivery, DOWNGRADE_DETAIL)
     except Exception:
         logger.exception("Deployment could not be updated.")
         _fail(delivery, "Deployment could not be updated.")

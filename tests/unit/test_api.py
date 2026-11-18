@@ -384,8 +384,7 @@ def test_list_limited_to_targets(client: Any, monkeypatch: pytest.MonkeyPatch) -
             "REFUSE_DOWNGRADES",
             "true",
             "1.0.0",
-            "The tag isn't a version at least as high as the deployment's; "
-            "nothing changed.",
+            "The tag isn't an upgrade of the deployment's; nothing changed.",
         ),
         (
             "ALLOWED_TAGS",

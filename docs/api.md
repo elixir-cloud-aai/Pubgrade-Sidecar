@@ -119,10 +119,11 @@ With the chart values `refuseDowngrades` and `allowedTags` (since version
 [Refusing downgrades](deployment.md#refusing-downgrades)), both `PUT` calls
 answer 409 for a tag that doesn't match `allowedTags` (`"detail": "The
 sidecar's settings don't allow this tag; nothing changed."`), and, with
-`refuseDowngrades`, for a tag that isn't a version at least as high as that of
-each container it would change (`"detail": "The tag isn't a version at least
-as high as the deployment's; nothing changed."`). A notification refused this
-way doesn't end a delivery that still waits for its image. If a deployment
+`refuseDowngrades`, for a tag that isn't a higher version than that of each
+container it would change, or than that of a delivery that still waits for
+its image (`"detail": "The tag isn't an upgrade of the deployment's; nothing
+changed."`). A notification refused this way doesn't end a delivery that
+still waits for its image. If a deployment
 gets a higher version while a delivery waits, the delivery fails with this
 `detail` instead of patching it back.
 
