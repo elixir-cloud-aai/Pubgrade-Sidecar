@@ -105,12 +105,26 @@ Status  Meaning
 404     Deployment not found; for `PUT /deployment`: no container uses the
         repository
 405     Method not allowed
-409     No container of the deployment uses the image repository; nothing
-        changed
+409     No container of the deployment uses the image repository, or the
+        sidecar's settings refuse the tag (`allowedTags`, `refuseDowngrades`);
+        nothing changed
 413     Request body larger than 64 KiB
 415     Media type not supported
-500     The Kubernetes API failed; try again
+500     The Kubernetes API failed; try again. Or `allowedTags` isn't a
+        regular expression
 ```
+
+With the chart values `refuseDowngrades` and `allowedTags` (since version
+4.1.0 of the API, see
+[Refusing downgrades](deployment.md#refusing-downgrades)), both `PUT` calls
+answer 409 for a tag that doesn't match `allowedTags` (`"detail": "The
+sidecar's settings don't allow this tag; nothing changed."`), and, with
+`refuseDowngrades`, for a tag that isn't a version at least as high as that of
+each container it would change (`"detail": "The tag isn't a version at least
+as high as the deployment's; nothing changed."`). A notification refused this
+way doesn't end a delivery that still waits for its image. If a deployment
+gets a higher version while a delivery waits, the delivery fails with this
+`detail` instead of patching it back.
 
 Since version 3.0.0 of the API, errors are
 [problem details](https://www.rfc-editor.org/rfc/rfc9457)
