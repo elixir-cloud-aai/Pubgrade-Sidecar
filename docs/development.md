@@ -122,8 +122,21 @@ workflow: its release-prep pull request moved the app from 0.1.0 to it.
 1. Release-prep pull request to `dev`: set the version in `pyproject.toml`,
    `deployment/Chart.yaml` (`version` and `appVersion`) and `CITATION.cff`
    (`python scripts/citation.py set <version>`, which also sets the release
-   date), and run `uv lock`.
-2. Once CI has passed for its commit on `dev`, bring that commit to `main`.
+   date), run `uv lock`, and add the curated release notes
+   `docs/releases/<version>.md` (see below), also to the `nav` of
+   `mkdocs.yml`, newest first, in the section "Releases" before
+   "Code reference" (the first notes add it):
+
+   ```yaml
+   - Releases:
+       - "0.3.0": releases/0.3.0.md
+   ```
+2. Once CI has passed for its commit on `dev`, check the notes, as the
+   release workflow does after the tag (a failure there needs a new version):
+   `python scripts/release_notes.py require <version>`,
+   `! grep -n TODO docs/releases/<version>.md` and
+   `python scripts/release_notes.py check docs/releases/<version>.md`. Then
+   bring that commit to `main`.
 3. Tag it on `main` with a signed, annotated tag and push the tag:
    `git tag -s v<version> -m v<version>`, then
    `git push origin v<version>`.
@@ -139,13 +152,44 @@ GitHub release, with the chart and its Sigstore bundle attached. Pushing the
 image and publishing the release each need approval in the environment
 `release`.
 
-The release gets GitHub's generated notes; for a first release (no published
-release before it), `scripts/release_notes.py` builds them instead, because
-without a previous tag GitHub starts at an older tag of its own choice. Edit
-the notes by hand into the agreed format after publishing: the notes of
-immutable releases stay editable, their assets don't. So the release is
-created as a draft, gets its assets and is published last
-(`scripts/release_assets.py`); a re-run of failed jobs finishes it. Don't
+Release notes follow the format agreed for all repositories of the
+organization:
+
+1. An intro paragraph saying what the release brings, with a link to the
+   upgrade or migration guide if there is one.
+2. Grouped sections, empty ones left out, in this order: `## Breaking
+   changes`, `## Features`, `## Security`, `## Fixes`, `## Documentation`,
+   `## Maintenance`. Each bullet ends with its issue and pull request
+   numbers, e.g., `(#12, #34)`.
+3. `## Commits`: GitHub's generated notes, verbatim (including "New
+   Contributors"), without their `## What's Changed` header.
+4. Last, GitHub's generated `**Full Changelog**: ...` line.
+
+The curated notes in `docs/releases/<version>.md` hold parts 1 and 2,
+without a title (the release's title is its tag). The release body never
+changes, so they link with full URLs to the release's files, docs included
+(`https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/blob/v<version>/docs/...`),
+never to versions that move (`latest`, `dev`) and never with relative links,
+which don't work in the release body. They don't link the docs on Read the
+Docs: those are a section of Pubgrade's, versioned by Pubgrade's releases,
+which show the Sidecar commit that Pubgrade's submodule pins, so a version of
+them with the Sidecar's version may not exist or may show another one. The notes must be
+a regular file (not a symbolic link). The release
+workflow fails if the notes contain `TODO`, aren't in this format, or are
+missing once any release has curated notes (`scripts/release_notes.py`); the
+unit tests check all notes in `docs/releases/` too. The workflow adds parts 3
+and 4 from GitHub's generated notes; for a first release (no published
+release before it), `scripts/release_notes.py first` builds them instead,
+because without a previous tag GitHub starts at an older tag of its own
+choice. The notes of immutable releases stay editable, their assets don't, so
+the release is created as a draft, gets its assets and is published last
+(`scripts/release_assets.py`); a re-run of failed jobs finishes it. Every
+job reads the notes of the tagged commit, which can't change, so the notes
+must be right before the tag (the checks above). To fix the notes of a
+published release, edit them by hand (they stay editable), and make the same
+change in `docs/releases/<version>.md` on `dev`, for the docs. A re-run of
+`publish` writes the notes of the tagged commit back into a published
+release, over hand edits, so don't re-run it after editing them. Don't
 re-run all jobs of a release that was published: that builds a new image
 digest and moves the release's image tags to it before it fails at the
 release.
