@@ -17,15 +17,19 @@ from urllib.parse import urlsplit
 from flask import Response, jsonify, request
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
+from packaging.version import InvalidVersion, Version
 import requests
 
 from pubgrade_sidecar.errors.exceptions import (
+    DOWNGRADE_DETAIL,
     BadRequest,
+    DowngradeRefused,
     Forbidden,
     ImageRepositoryMismatch,
     ImageUnavailable,
     InternalServerError,
     NotFound,
+    TagNotAllowed,
     Unauthorized,
 )
 
@@ -89,6 +93,9 @@ TOKEN_CHUNK_SIZE = 4096
 CHALLENGE_PARAMETER = re.compile(r'(\w+)="([^"]*)"')
 # The format of Docker image tags
 VALID_TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
+# Values of `REFUSE_DOWNGRADES`; any other value counts as on
+SETTING_ON = frozenset({"1", "true", "yes", "on"})
+SETTING_OFF = frozenset({"", "0", "false", "no", "off"})
 
 
 @dataclass
@@ -421,6 +428,11 @@ def updateDeployment(deployment_name: str) -> tuple[Response, int]:
             digest.
         ImageRepositoryMismatch: If no container of the deployment uses the
             repository.
+        TagNotAllowed: If the tag doesn't match `ALLOWED_TAGS`.
+        DowngradeRefused: With `REFUSE_DOWNGRADES`, if the tag isn't an
+            upgrade of each container it would change (see `_check_upgrade`),
+            or would undercut a waiting delivery (see `_undercuts_waiting`).
+        InternalServerError: If `ALLOWED_TAGS` isn't a regular expression.
     """
     _check_token()
     _check_target(deployment_name)
@@ -430,7 +442,9 @@ def updateDeployment(deployment_name: str) -> tuple[Response, int]:
     if plan is None:
         raise ImageRepositoryMismatch
     image, changes = plan
-    if not _start_delivery(deployment_name, image, image_repo, image_tag, changes):
+    if not _start_deliveries(
+        image_repo, image_tag, [(deployment_name, image, changes)]
+    ):
         return jsonify(
             {"message": "Deployment already uses this image.", "image": image}
         ), 200
@@ -461,6 +475,12 @@ def updateDeployments() -> tuple[Response, int]:
             digest.
         NotFound: If no container of these deployments uses the repository.
         Forbidden: If the sidecar has no right to read the deployments.
+        TagNotAllowed: If the tag doesn't match `ALLOWED_TAGS`.
+        DowngradeRefused: With `REFUSE_DOWNGRADES`, if the tag isn't an
+            upgrade of each container it would change in any of the
+            deployments, or would undercut a waiting delivery of any of them;
+            then no deployment rolls out.
+        InternalServerError: If `ALLOWED_TAGS` isn't a regular expression.
     """
     _check_token()
     image_repo, image_tag = _notification()
@@ -471,10 +491,7 @@ def updateDeployments() -> tuple[Response, int]:
             plans.append((deployment.metadata.name, *plan))
     if not plans:
         raise NotFound
-    rolling_out = []
-    for name, image, changes in plans:
-        if _start_delivery(name, image, image_repo, image_tag, changes):
-            rolling_out.append((name, image, changes))
+    rolling_out = _start_deliveries(image_repo, image_tag, plans)
     started = bool(rolling_out)
     message = (
         "Updating images in progress..."
@@ -499,6 +516,8 @@ def _notification() -> tuple[str, str]:
     Raises:
         BadRequest: If the tag is invalid, or the image name has a tag or a
             digest (which would be dropped).
+        TagNotAllowed: If the tag doesn't match `ALLOWED_TAGS`.
+        InternalServerError: If `ALLOWED_TAGS` isn't a regular expression.
     """
     # The API's validation ensures a JSON object with both fields
     body = cast(dict[str, str], request.json)
@@ -507,7 +526,147 @@ def _notification() -> tuple[str, str]:
         raise BadRequest
     if _has_tag_or_digest(image_name):
         raise BadRequest
+    _check_allowed_tag(image_tag)
     return _parse_image(image_name)[0], image_tag
+
+
+def _check_allowed_tag(image_tag: str) -> None:
+    """Check a tag against the pattern of allowed tags, if one is set.
+
+    The pattern is the regular expression (Python syntax) in `ALLOWED_TAGS`;
+    the whole tag must match it. Without it, or if it is empty, any tag is
+    allowed.
+
+    Args:
+        image_tag: Tag of a notification.
+
+    Raises:
+        TagNotAllowed: If the tag doesn't match the pattern.
+        InternalServerError: If the pattern isn't a regular expression, so
+            that no tag is allowed until it is fixed.
+    """
+    pattern = os.getenv("ALLOWED_TAGS", "").strip()
+    if not pattern:
+        return
+    try:
+        allowed = re.compile(pattern)
+    except re.error:
+        logger.error("ALLOWED_TAGS is no regular expression; all tags refused.")
+        raise InternalServerError from None
+    if not allowed.fullmatch(image_tag):
+        raise TagNotAllowed
+
+
+def _refuse_downgrades() -> bool:
+    """Tell whether notifications of lower versions are refused.
+
+    Returns:
+        Whether `REFUSE_DOWNGRADES` is on (`true`, `1`, `yes` or `on`, in any
+        case). Values that are neither on nor off (`false`, `0`, `no`, `off`
+        or empty) count as on, so that a typo doesn't allow downgrades.
+    """
+    value = os.getenv("REFUSE_DOWNGRADES", "").strip().lower()
+    if value in SETTING_OFF:
+        return False
+    if value not in SETTING_ON:
+        logger.error("REFUSE_DOWNGRADES has an unknown value; downgrades refused.")
+    return True
+
+
+def _version(tag: str | None) -> Version | None:
+    """Read a tag as a version.
+
+    Versions follow PEP 440, which also reads SemVer's pre-releases, e.g.,
+    `1.2.0-rc.1` as `1.2.0rc1`, and allows a leading `v`. Post-releases count
+    only as `.postN` (`1.2.0.post1`): others, e.g., `1.2.0-1`, `1.2.0-r1` or
+    `1.2.0_r1`, are refused, as SemVer reads those with a hyphen as
+    pre-releases, i.e., lower versions, and the others often name rebuilds or
+    flavours of a release rather than later releases.
+
+    Args:
+        tag: Tag of an image, if any.
+
+    Returns:
+        The version, or None if the tag is missing, isn't a version, or is
+        ambiguous.
+    """
+    if tag is None:
+        return None
+    try:
+        version = Version(tag)
+    except InvalidVersion:
+        return None
+    if version.post is not None and f".post{version.post}" not in tag.lower():
+        return None
+    return version
+
+
+def _is_upgrade(old_tag: str | None, new_tag: str) -> bool:
+    """Tell whether a new tag is a higher version than an old one.
+
+    Both must be versions (see `_version`) with the same number of release
+    segments, e.g., `1.2.0` and `1.3.0`, not `1.2` and `1.2.0` (a tag like
+    `1.2` often moves along its patch releases, so `1.2.0` may be older) or
+    `1.2.0` and `20230101` (a build number or a date). The new version must
+    be higher; the same version spelled otherwise (`v1.2.0`) is no upgrade.
+
+    Args:
+        old_tag: Current tag, if any.
+        new_tag: Tag of the notification.
+
+    Returns:
+        Whether the new tag is an upgrade.
+    """
+    old, new = _version(old_tag), _version(new_tag)
+    return (
+        old is not None
+        and new is not None
+        and len(old.release) == len(new.release)
+        and new > old
+    )
+
+
+def _check_upgrade(changes: list[tuple[int, str, str]], image_tag: str) -> None:
+    """Check that changes of containers are upgrades.
+
+    Args:
+        changes: Containers to change, each with its index, its current and
+            its new image.
+        image_tag: Tag of the notification.
+
+    Raises:
+        DowngradeRefused: If the tag isn't an upgrade (see `_is_upgrade`) of
+            the current tag of each container to change. A digest next to a
+            tag doesn't count.
+    """
+    for _, old_image, _ in changes:
+        if not _is_upgrade(_parse_image(old_image)[1], image_tag):
+            raise DowngradeRefused
+
+
+def _undercuts_waiting(key: tuple[str, str], image_tag: str) -> bool:
+    """Tell whether a notification would undercut a delivery that waits.
+
+    A notification that would end or replace a delivery of the same
+    deployment and repository that still waits for its image must name that
+    delivery's tag or an upgrade of it (see `_is_upgrade`); otherwise, e.g., a
+    notification of the current tag could cancel a waiting security release.
+    The caller holds `_lock`, so that no delivery starts between this check
+    and the replacement.
+
+    Args:
+        key: Name of the deployment and canonical repository of the image.
+        image_tag: Tag of the notification.
+
+    Returns:
+        Whether a waiting delivery has another tag, of which this one is no
+        upgrade.
+    """
+    delivery = _deliveries.get(key)
+    if delivery is None or delivery.state != "waiting_for_image":
+        return False
+    waiting_tag = _parse_image(delivery.image)[1]
+    return waiting_tag != image_tag and not _is_upgrade(waiting_tag, image_tag)
 
 
 def _managed_deployments() -> list[Any]:
@@ -580,6 +739,10 @@ def _plan_update(
         and the containers to change (empty if none needs to), each with its
         index, its current and its new image; None if no container uses the
         repository.
+
+    Raises:
+        DowngradeRefused: With `REFUSE_DOWNGRADES`, if any change would be a
+            downgrade (see `_check_upgrade`).
     """
     image = None
     changes = []
@@ -598,48 +761,61 @@ def _plan_update(
             image = new_image
     if image is None:
         return None
+    if _refuse_downgrades():
+        _check_upgrade(changes, image_tag)
     return image, changes
 
 
-def _start_delivery(
-    deployment_name: str,
-    image: str,
+def _start_deliveries(
     image_repo: str,
     image_tag: str,
-    changes: list[tuple[int, str, str]],
-) -> bool:
-    """Start the delivery of an image to a deployment, if it needs one.
+    plans: list[tuple[str, str, list[tuple[int, str, str]]]],
+) -> list[tuple[str, str, list[tuple[int, str, str]]]]:
+    """Start the deliveries of an image to deployments that need one.
 
-    The delivery plans its patch anew from the deployment as it is right
-    before the patch (see `_deliver`); this plan is for the response.
+    Each delivery plans its patch anew from the deployment as it is right
+    before the patch (see `_deliver`); these plans are for the response. A
+    deployment without changes ends an earlier delivery that still waits.
+    With `REFUSE_DOWNGRADES`, no delivery starts or ends if the notification
+    would undercut a waiting delivery of any of the deployments (see
+    `_undercuts_waiting`), checked under the same hold of `_lock` as the
+    replacements.
 
     Args:
-        deployment_name: Name of the deployment.
-        image: Image of the first container of the repository after the update.
         image_repo: Canonical repository of the image.
         image_tag: Tag of the image.
-        changes: Containers to change, each with its index, its current and
-            its new image; none if the deployment uses the image already,
-            which ends an earlier delivery that still waits.
+        plans: Per deployment, its name, the image of its first container of
+            the repository after the update, and the containers to change,
+            each with its index, its current and its new image.
 
     Returns:
-        Whether a delivery started.
+        The plans of the deployments whose delivery started.
+
+    Raises:
+        DowngradeRefused: If the notification would undercut a waiting
+            delivery.
     """
-    key = (deployment_name, image_repo)
-    if not changes:
-        with _lock:
-            _deliveries.pop(key, None)
-        return False
-    delivery = _Delivery(
-        image=image,
-        targets=[(index, new_image) for index, _, new_image in changes],
-    )
+    refuse = _refuse_downgrades()
+    started = []
     with _lock:
-        # Last in the order of the records, as the newest notification
-        _deliveries.pop(key, None)
-        _deliveries[key] = delivery
-    _executor.submit(_deliver, delivery, image_repo, image_tag, deployment_name)
-    return True
+        if refuse and any(
+            _undercuts_waiting((name, image_repo), image_tag) for name, _, _ in plans
+        ):
+            raise DowngradeRefused
+        for name, image, changes in plans:
+            key = (name, image_repo)
+            # Last in the order of the records, as the newest notification
+            _deliveries.pop(key, None)
+            if changes:
+                delivery = _Delivery(
+                    image=image,
+                    targets=[(index, new_image) for index, _, new_image in changes],
+                )
+                _deliveries[key] = delivery
+                started.append((name, image, changes, delivery))
+    for name, _, _, delivery in started:
+        _executor.submit(_deliver, delivery, image_repo, image_tag, name)
+    return [(name, image, changes) for name, image, changes, _ in started]
 
 
 def _json_patch(changes: list[tuple[int, str, str]]) -> list[dict[str, str]]:
@@ -695,7 +871,8 @@ def _deliver(
     patch lock). Under that lock, the deployment is read again and the patch
     planned anew, so that containers added, removed or reordered, or patched
     by an older delivery, during the wait count; a deployment that no longer
-    uses the repository fails the delivery. The Kubernetes API is called
+    uses the repository fails the delivery, and so does one that would be a
+    downgrade by then, with `REFUSE_DOWNGRADES`. The Kubernetes API is called
     outside the lock of the records, so that status reports don't wait for
     it.
 
@@ -740,6 +917,10 @@ def _deliver(
     except ImageUnavailable:
         logger.warning("Image of a notification isn't available.")
         _fail(delivery, "Image not available, or its registry not reachable.")
+    except DowngradeRefused:
+        # The deployment got a higher version during the wait
+        logger.warning("Delivery refused, as it would be a downgrade.")
+        _fail(delivery, DOWNGRADE_DETAIL)
     except Exception:
         logger.exception("Deployment could not be updated.")
         _fail(delivery, "Deployment could not be updated.")

@@ -375,3 +375,38 @@ def test_list_limited_to_targets(client: Any, monkeypatch: pytest.MonkeyPatch) -
     assert response.status_code == 200
     assert response.json == ["tesk-api"]
     listed.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "setting,value,tag,detail",
+    [
+        (
+            "REFUSE_DOWNGRADES",
+            "true",
+            "1.0.0",
+            "The tag isn't an upgrade of the deployment's; nothing changed.",
+        ),
+        (
+            "ALLOWED_TAGS",
+            r"[0-9]+\.[0-9]+\.[0-9]+",
+            "1.2.0rc1",
+            "The sidecar's settings don't allow this tag; nothing changed.",
+        ),
+    ],
+)
+def test_rollout_policy_refusals(
+    client: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    setting: str,
+    value: str,
+    tag: str,
+    detail: str,
+) -> None:
+    """Test that notifications the rollout policy refuses get a 409 that says so."""
+    monkeypatch.setenv(setting, value)
+    with patch(READ, return_value=deployment("elixircloud/tesk-api:1.1.0")):
+        response = client.put(URL, headers=TOKEN, json={**BODY, "tag": tag})
+    assert response.status_code == 409
+    assert response.mimetype == "application/problem+json"
+    assert response.json["detail"] == detail
+    cast(MagicMock, controllers._executor).submit.assert_not_called()

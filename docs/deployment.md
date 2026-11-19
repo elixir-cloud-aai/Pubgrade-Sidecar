@@ -179,6 +179,83 @@ one in the cluster, go in `insecureRegistries` (`host` or `host:port`;
 environment variable `INSECURE_REGISTRIES`, comma-separated); credentials for
 them are sent unencrypted.
 
+## Refusing downgrades
+
+By default, the sidecar rolls out any tag that a notification names, as long
+as the registry has it. Whoever holds the sidecar's access token, or makes
+Pubgrade send a notification (with a repository's token, or with access to
+Pubgrade's database, which stores the sidecars' tokens), can therefore roll
+the deployments back to any older release that is still in the registry, with
+its known vulnerabilities. Build types don't prevent it: the publisher chooses
+them. Two settings limit what a notification can roll out; both are off by
+default, and a notification they refuse changes nothing and gets a 409:
+
+- `refuseDowngrades: true` (environment variable `REFUSE_DOWNGRADES=true`)
+  rolls out only upgrades: a notification's tag must be a higher version than
+  the current tag of every container it would change. In a `PUT /deployment`
+  for all deployments, one container that it wouldn't upgrade when the
+  notification arrives refuses the whole notification, so no deployment rolls
+  out; a deployment that changes later, while the deliveries wait, fails only
+  its own delivery (see below), and the others still get their upgrades.
+    - **Comparison:** tags are compared as versions by
+      [PEP 440](https://peps.python.org/pep-0440/), which also reads SemVer
+      pre-releases (`1.2.0-rc.1` as `1.2.0rc1`) and allows a leading `v`:
+      `1.2.0rc1` is lower than `1.2.0`, and `1.10.0` higher than `1.9.0`.
+      Both tags must have the same number of release segments: `1.2.0` to
+      `1.3.0`, or `1.2` to `1.3`, but not `1.2` to `1.2.0` (a tag like `1.2`
+      often moves along its patch releases, so `1.2.0` may be older) or
+      `1.2.0` to `20230101` (a build number or date, or a commit hash of
+      digits, reads as a very high version). The same version spelled
+      otherwise (`v1.2.0` after `1.2.0`) isn't an upgrade either.
+    - **Refused tags:** tags that aren't versions (e.g., `latest`, `dev`,
+      `sha-<commit>` or `1.2.0-alpine`), post-releases written otherwise than
+      `.postN` (e.g., `1.2.0-1`, `1.2.0-r1` or `1.2.0_r1`, which SemVer reads
+      as pre-releases, or which name rebuilds rather than later releases,
+      while PEP 440 reads them as later releases), and notifications for
+      containers whose
+      current tag isn't a version, or that have no tag (only a digest, or
+      none, which means `latest`). So pin the target containers to version
+      tags before turning it on. A digest next to the tag
+      (`app:1.2.0@sha256:...`) doesn't count; the tag does.
+    - **Waiting deliveries:** the sidecar compares with the deployment as it
+      is, both when the notification arrives and again right before its
+      patch: a deployment that got a higher version while the delivery
+      waited for its image isn't patched back, and the delivery fails (see
+      [API](api.md)). A notification also can't undercut a delivery that
+      still waits for its image: unless it names the same tag or a higher
+      version, it is refused, so that, e.g., a notification of the current
+      tag doesn't cancel a waiting release. In turn, a waiting higher tag,
+      even one that never appears in the registry, refuses lower
+      notifications until it fails (after about two minutes); `allowedTags`
+      doesn't change that.
+    - **Values:** `true`, `1`, `yes` and `on` turn it on, and `false`, `0`,
+      `no`, `off` and an empty value leave it off (in any case); any other
+      value turns it on too, so that a typo doesn't allow downgrades, and
+      the sidecar logs an error (with each notification).
+- `allowedTags` (environment variable `ALLOWED_TAGS`) is a regular expression
+  (Python syntax) that the whole tag must match, e.g., stable releases only:
+
+  ```yaml
+  refuseDowngrades: true
+  allowedTags: '[0-9]+\.[0-9]+\.[0-9]+'
+  ```
+
+  Other tags are refused before the sidecar reads any deployment. A pattern
+  that isn't a regular expression refuses every notification (with a 500),
+  and the sidecar logs an error. The pattern is matched against every
+  notification's tag (at most 128 characters), without a time limit: keep it
+  simple, without nested repetitions such as `([0-9]+)+`, which can take very
+  long on some tags.
+
+Turn on both: `refuseDowngrades` alone accepts any tag that reads as a
+higher version with as many segments, e.g., an old image tagged `2023.01.0`
+after `2.5.0`, or a commit hash that reads as a version (`1234567`, or
+`12345a6`, a pre-release of 12345, after another one), so name the tags of
+your releases in `allowedTags`. Together,
+they don't stop a holder of a token from rolling out a higher release that
+is in the registry; they keep old, still published images, and tags that
+move (such as `latest`), out of the deployments.
+
 ## Resources
 
 The chart sets the CPU and memory requests and limits of the container
@@ -217,6 +294,14 @@ set. Since the first release, 0.2.0, `latest` is the image of the highest
 stable release. If you pulled `latest` (or deployed the chart with its
 default tag) to follow development, switch to `sha-<commit>` (or `dev`), or
 pin a release.
+
+## Upgrading to version 4.1.0 of the API
+
+Version 4.1.0 of the API adds the chart values `refuseDowngrades` and
+`allowedTags` (environment variables `REFUSE_DOWNGRADES` and `ALLOWED_TAGS`,
+see [Refusing downgrades](#refusing-downgrades)), under which `PUT` calls
+answer 409 for notifications that they refuse. Both are off by default, so
+nothing changes until you set them.
 
 ## Upgrading to version 4.0.0 of the API
 

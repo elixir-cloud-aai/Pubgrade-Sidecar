@@ -50,7 +50,8 @@ The integration test runs the sidecar on a real, throw-away cluster: it builds
 the image, starts k3s in a Docker container, installs the chart into two
 namespaces and checks that notifications roll the target Deployments out to
 the new tag and that the status reports it, with the chart's minimal Role, and
-in one namespace under an arbitrary user ID with group 0, as on OpenShift. It
+in one namespace under an arbitrary user ID with group 0, as on OpenShift, and
+with `allowedTags`, which refuses tags unlike the new one. It
 also runs the check of deployed instances (`tests/check_deployment.sh`, see
 [Deployment](deployment.md#checking-a-deployed-sidecar)) against one of the
 sidecars, over a port forward, without its HTTPS checks, which need a host

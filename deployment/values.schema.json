@@ -23,6 +23,8 @@
       }
     },
     "deploymentLabel": {"type": "string"},
+    "refuseDowngrades": {"type": "boolean"},
+    "allowedTags": {"type": "string"},
     "accessToken": {
       "type": "object",
       "properties": {

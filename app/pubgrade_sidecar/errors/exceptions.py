@@ -15,6 +15,10 @@ from foca.errors import (
     Unauthorized,
 )
 
+# Explanation of a refused downgrade (`DowngradeRefused`), in the response and
+# in the status report of a delivery that the check before its patch refuses
+DOWNGRADE_DETAIL = "The tag isn't an upgrade of the deployment's; nothing changed."
+
 
 class ImageUnavailable(NotFound):
     """Raised when the image of a notification isn't in its registry.
@@ -28,6 +32,23 @@ class ImageUnavailable(NotFound):
 
 class ImageRepositoryMismatch(Conflict):
     """Raised when a notification is for another image repository."""
+
+    pass
+
+
+class DowngradeRefused(Conflict):
+    """Raised when a notification isn't an upgrade.
+
+    Only with `REFUSE_DOWNGRADES`: its tag isn't a higher version than the
+    current tag of each container it would change, or than the tag of a
+    delivery that still waits, or one of these tags isn't a version.
+    """
+
+    pass
+
+
+class TagNotAllowed(Conflict):
+    """Raised when the tag of a notification doesn't match `ALLOWED_TAGS`."""
 
     pass
 
@@ -77,6 +98,16 @@ exceptions = {
         "title": "Conflict",
         "status": 409,
         "detail": "The deployment uses another image repository.",
+    },
+    DowngradeRefused: {
+        "title": "Conflict",
+        "status": 409,
+        "detail": DOWNGRADE_DETAIL,
+    },
+    TagNotAllowed: {
+        "title": "Conflict",
+        "status": 409,
+        "detail": "The sidecar's settings don't allow this tag; nothing changed.",
     },
     Unauthorized: {
         "title": "Unauthorized",
