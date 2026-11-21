@@ -86,10 +86,11 @@ the files in Git that a GitOps tool deploys from. These keep the image they
 pin, and the next time they are applied, the Deployment goes back to it:
 
 - **`helm upgrade` of the target's release**, e.g., to change a setting:
-  Helm compares the release's manifest with the live Deployment and puts the
-  release's image back, so the Deployment rolls back to the older image.
-  `--reuse-values` doesn't help, as the release's values never had the new
-  tag; `helm rollback` restores an old release's image in the same way.
+  Helm (3) patches the live Deployment towards the new manifest, which has
+  the release's image, so the Deployment rolls back to the older image, even
+  if the image value didn't change between the releases. `--reuse-values`
+  doesn't help, as the release's values never had the new tag; `helm
+  rollback` restores an old release's image in the same way.
 - **GitOps tools** (Argo CD, Flux): the rollout is drift from Git. A tool
   that corrects drift (Argo CD's self-heal, Flux's drift detection) undoes it
   right away; otherwise, the next sync or upgrade of the release does.
@@ -97,25 +98,34 @@ pin, and the next time they are applied, the Deployment goes back to it:
 The sidecar doesn't stop any of this: `refuseDowngrades` only applies to its
 own notifications. To keep a rollout, choose one of these:
 
-- **Pass the live image to `helm upgrade`.** Read the tag that runs now and
-  set it in the chart's image value (often `image.tag`; see the target
-  chart's values), e.g., for a target `tesk-api` whose first container is the
-  one that the sidecar updates:
+- **Pass the live image to `helm upgrade`.** Once the rollout is complete,
+  read the images of the containers that the sidecar updates (every
+  container of the notified image repository) and set their tags in the
+  chart's image values (often `image.tag`; see the target chart's values),
+  e.g., for a target `tesk-api`:
 
   ```bash
-  kubectl -n production get deployment tesk-api \
-    -o jsonpath='{.spec.template.spec.containers[0].image}'
-  # e.g., elixircloud/tesk-api:1.2.0
+  kubectl -n production rollout status deployment/tesk-api
+  kubectl -n production get deployment tesk-api -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\t"}{.image}{"\n"}{end}'
+  # e.g., tesk-api    elixircloud/tesk-api:1.2.0
   helm upgrade tesk-api <chart> -n production -f values.yaml \
     --set image.tag=1.2.0
   ```
 
-  `GET /deployment/{name}` (see [API](api.md)) reports the image too.
-- **Update the values file after each rollout**, so that it pins the tag
-  that the sidecar rolled out, and upgrade from that file only.
-- **With a GitOps tool**, either make it ignore the image of the target's
-  containers, e.g., Argo CD's `ignoreDifferences` on
-  `/spec/template/spec/containers/0/image` together with the sync option
+  These commands read the Deployment's template, i.e., the image that it
+  should run; `rollout status` waits until its pods run it, and fails if
+  they don't. Don't pin the tag of a rollout that failed (`"status":
+  "failed"` from `GET /deployment/{name}`, see [API](api.md), whose `image`
+  is that of the first container only). A delivery that the sidecar rolls
+  out between reading the tag and `helm upgrade` is undone by the upgrade,
+  so upgrade when no notification is expected, or read the image again
+  afterwards.
+- **Update the values file after each rollout** that completed, so that it
+  pins the tag that the sidecar rolled out, and upgrade from that file only.
+- **With a GitOps tool**, either make it ignore the image of every container
+  that the sidecar updates, e.g., Argo CD's `ignoreDifferences` on
+  `/spec/template/spec/containers/0/image` for the first container (one
+  entry per container) together with the sync option
   `RespectIgnoreDifferences=true` (without it, a sync still applies the
   image from Git), or let the tool's own image updater (Argo CD Image
   Updater, Flux's image automation) follow the registry and write new tags
@@ -124,8 +134,8 @@ own notifications. To keep a rollout, choose one of these:
 Labels and annotations of the target stay as the chart set them: in
 particular, `app.kubernetes.io/version` (and `helm.sh/chart`) keep the
 versions that the chart set (usually its `appVersion`) after a rollout, so
-they don't say which image runs. Read
-the image from the Deployment, as above, instead.
+they don't say which image runs. Read the image from the Deployment, as
+above, instead.
 
 ## Checking a deployed sidecar
 
