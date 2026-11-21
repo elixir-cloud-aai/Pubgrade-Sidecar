@@ -14,7 +14,8 @@ OpenShift.
 ## Contents
 
 - [Deployment](deployment.md): install the sidecar with its Helm chart, on
-  Kubernetes and OpenShift, refuse downgrades, upgrade to versions 3.0.0,
+  Kubernetes and OpenShift, keep rollouts across `helm upgrade`, refuse
+  downgrades, upgrade to versions 3.0.0,
   3.1.0, 3.2.0, 4.0.0 and 4.1.0 of the API,
   and upgrade from chart version 0.1.
 - [API](api.md): the calls, their status codes, the errors and the status
