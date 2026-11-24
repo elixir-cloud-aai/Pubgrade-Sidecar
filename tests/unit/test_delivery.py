@@ -16,7 +16,10 @@ from pubgrade_sidecar.errors.exceptions import ImageRepositoryMismatch
 TOKEN = "test-token"
 READ = "kubernetes.client.AppsV1Api.read_namespaced_deployment"
 PATCH = "kubernetes.client.AppsV1Api.patch_namespaced_deployment"
-CHECK = "pubgrade_sidecar.controllers.check_image_availability"
+CHECK = "pubgrade_sidecar.controllers.check_image"
+# Outcomes of the availability check
+AVAILABLE = controllers.ImageCheck(available=True)
+MISSING = controllers.ImageCheck(available=False, reason="registry answered 404")
 
 
 class ImmediateExecutor:
@@ -169,7 +172,7 @@ def test_token_rejected(app: Flask, token: str | None) -> None:
 
 
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, return_value=deployment(image="other/image:1.0"))
 def test_notify_other_repository(
     mock_read: MagicMock,
@@ -220,7 +223,7 @@ def test_notify_invalid_tag(
     ],
 )
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ)
 def test_notify_patches_tag(
     mock_read: MagicMock,
@@ -265,9 +268,9 @@ def test_notify_returns_at_once(
 
     mock_patch.side_effect = finish_patch
 
-    def wait_for_release(image_name: str, tag: str) -> bool:
+    def wait_for_release(image_name: str, tag: str) -> controllers.ImageCheck:
         release.wait(timeout=10)
-        return True
+        return AVAILABLE
 
     with patch(CHECK, side_effect=wait_for_release):
         _, code = notify(app, "elixircloud/tesk-api")
@@ -281,7 +284,7 @@ def test_notify_returns_at_once(
 
 @patch(PATCH)
 @patch("pubgrade_sidecar.controllers.time.sleep")
-@patch(CHECK, return_value=False)
+@patch(CHECK, return_value=MISSING)
 @patch(READ, return_value=deployment())
 def test_image_never_available(
     mock_read: MagicMock,
@@ -294,8 +297,8 @@ def test_image_never_available(
     """Test that a missing image is reported, and the deployment untouched."""
     monkeypatch.setattr(controllers, "_executor", ImmediateExecutor())
     notify(app, "elixircloud/tesk-api")
-    assert mock_check.call_count == controllers.MAX_RETRY + 1
-    assert mock_sleep.call_count == controllers.MAX_RETRY
+    assert mock_check.call_count == controllers.IMAGE_WAIT_RETRIES + 1
+    assert mock_sleep.call_count == controllers.IMAGE_WAIT_RETRIES
     mock_patch.assert_not_called()
     result = status(app)
     assert result["status"] == "failed"
@@ -304,7 +307,7 @@ def test_image_never_available(
 
 
 @patch(PATCH, side_effect=RuntimeError("secret detail"))
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, return_value=deployment())
 def test_patch_fails(
     mock_read: MagicMock,
@@ -347,7 +350,7 @@ def test_newer_notification_wins(
     monkeypatch.setattr(controllers, "_executor", DeferredExecutor())
     notify(app, "elixircloud/tesk-api", tag="1.2.0")
     notify(app, "elixircloud/tesk-api", tag="1.3.0")
-    with patch(CHECK, return_value=True):
+    with patch(CHECK, return_value=AVAILABLE):
         for function, args in pending:
             function(*args)
     mock_patch.assert_called_once()
@@ -405,7 +408,7 @@ def test_rollout_status(
 
 
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, return_value=deployment())
 def test_status_after_patch_follows_deployment(
     mock_read: MagicMock,
@@ -472,7 +475,7 @@ def test_notify_invalid_tag_needs_no_cluster(mock_read: MagicMock, app: Flask) -
 
 
 @patch(PATCH)
-@patch(CHECK, return_value=False)
+@patch(CHECK, return_value=MISSING)
 @patch(READ, return_value=deployment(image="elixircloud/tesk-api:1.2.0"))
 def test_notify_current_image(
     mock_read: MagicMock,
@@ -495,7 +498,7 @@ def test_notify_current_image(
 
 
 @patch(PATCH, side_effect=RuntimeError("timed out"))
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, return_value=deployment())
 def test_failed_delivery_ends_with_the_requested_image(
     mock_read: MagicMock,
@@ -519,7 +522,7 @@ def test_failed_delivery_ends_with_the_requested_image(
 
 @patch(PATCH)
 @patch("pubgrade_sidecar.controllers.time.sleep")
-@patch(CHECK, return_value=False)
+@patch(CHECK, return_value=MISSING)
 @patch(READ, return_value=deployment())
 def test_superseded_delivery_stops_waiting(
     mock_read: MagicMock,
@@ -532,12 +535,12 @@ def test_superseded_delivery_stops_waiting(
     """Test that a replaced delivery gives up its worker."""
     calls = []
 
-    def replace_delivery(image_name: str, tag: str) -> bool:
+    def replace_delivery(image_name: str, tag: str) -> controllers.ImageCheck:
         calls.append(tag)
         controllers._deliveries[("tesk-api", "elixircloud/tesk-api")] = (
             controllers._Delivery(image="other")
         )
-        return False
+        return MISSING
 
     mock_check.side_effect = replace_delivery
     monkeypatch.setattr(controllers, "_executor", ImmediateExecutor())

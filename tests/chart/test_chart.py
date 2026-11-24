@@ -91,6 +91,13 @@ def render(*settings: str) -> dict[str, dict[str, Any]]:
         ([*REQUIRED, "securityContext.seccompProfile=false"], "seccompProfile"),
         ([*REQUIRED, "refuseDowngrades=yes"], "refuseDowngrades"),
         ([*REQUIRED, "allowedTags=1"], "allowedTags"),
+        ([*REQUIRED, "imageWait.retries=-1"], "imageWait"),
+        ([*REQUIRED, "imageWait.retries=1.5"], "imageWait"),
+        ([*REQUIRED, "imageWait.retries=101"], "imageWait"),
+        ([*REQUIRED, "imageWait.interval=0"], "imageWait"),
+        ([*REQUIRED, "imageWait.interval=3601"], "imageWait"),
+        ([*REQUIRED, "imageWait.interval=soon"], "imageWait"),
+        ([*REQUIRED, "imageWait.interval=2.5"], "imageWait"),
     ],
 )
 def test_incomplete_values_fail(settings: list[str], message: str) -> None:
@@ -285,6 +292,28 @@ def test_no_rollout_policy_by_default() -> None:
     container = render()["Deployment"]["spec"]["template"]["spec"]["containers"][0]
     names = {variable["name"] for variable in container["env"]}
     assert not names & {"REFUSE_DOWNGRADES", "ALLOWED_TAGS"}
+
+
+def test_image_wait_defaults() -> None:
+    """Test that by default, the sidecar waits for an image as before."""
+    container = render()["Deployment"]["spec"]["template"]["spec"]["containers"][0]
+    variables = {variable["name"]: variable for variable in container["env"]}
+    assert variables["IMAGE_WAIT_RETRIES"]["value"] == "3"
+    assert variables["IMAGE_WAIT_INTERVAL"]["value"] == "30"
+
+
+@pytest.mark.parametrize(
+    "retries,interval",
+    [("0", "1"), ("10", "60"), ("100", "3600")],
+)
+def test_image_wait_reaches_sidecar(retries: str, interval: str) -> None:
+    """Test that the wait for an image is passed on as it is set."""
+    container = render(
+        f"imageWait.retries={retries}", f"imageWait.interval={interval}"
+    )["Deployment"]["spec"]["template"]["spec"]["containers"][0]
+    variables = {variable["name"]: variable for variable in container["env"]}
+    assert variables["IMAGE_WAIT_RETRIES"]["value"] == retries
+    assert variables["IMAGE_WAIT_INTERVAL"]["value"] == interval
 
 
 def test_registry_credentials_mounted_from_secret() -> None:

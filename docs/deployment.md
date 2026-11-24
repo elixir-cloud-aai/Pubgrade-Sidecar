@@ -239,6 +239,54 @@ one in the cluster, go in `insecureRegistries` (`host` or `host:port`;
 environment variable `INSECURE_REGISTRIES`, comma-separated); credentials for
 them are sent unencrypted.
 
+Docker Hub limits anonymous requests per source IP address (e.g.,
+`ratelimit-limit: 100;w=3600`, 100 per hour). In a cluster whose pods share
+one egress IP, e.g., CSC Rahti, other tenants can use the limit up, and every
+anonymous check then gets 429, also for public images. Authenticated checks
+count against the account instead: create a [personal access
+token](https://docs.docker.com/security/access-tokens/) with read-only access
+to public repositories and put it in `registryCredentials` as above, with
+`--docker-server=https://index.docker.io/v1/`.
+
+## Waiting for images
+
+A notification usually arrives right after its image was pushed, so the
+sidecar answers it at once (202) and waits for the image in the background:
+it checks the registry once, then up to `imageWait.retries` more times (3 by
+default), `imageWait.interval` seconds apart (30 by default; whole seconds in
+the chart), so for about 90 seconds in all. Outside the chart, the settings
+are the environment variables `IMAGE_WAIT_RETRIES` (0 or more) and
+`IMAGE_WAIT_INTERVAL` (seconds above 0); an invalid value keeps its default,
+with a warning in the log. If the registry answers 429 or 503 with
+`Retry-After`, the next check waits that long instead, if it is longer than
+the interval; the waits never add up to more than `retries` x `interval`
+seconds, and a wait that wouldn't fit ends the delivery at once. Each waiting
+delivery holds one of the sidecar's 16 workers, so keep the wait short.
+
+Each failed check is logged at the level WARNING, with the reason: the
+registry's status code with a short explanation and its `Retry-After` and
+rate-limit headers, or the class of the network error (never tokens,
+credentials, URLs or error messages), e.g.:
+
+```text
+Check 1 of 4 for image elixircloud/tesk-api:2.0.0 failed: registry answered 429 (rate limit reached; ratelimit-remaining: 0;w=3600)
+```
+
+If the image is still missing after the last check, the delivery fails, and
+`GET /deployment/{name}` reports the reason of the last check in `detail`,
+e.g., "Image not available, or its registry not reachable: registry answered
+404 (image or tag not found)." The deployment stays as it was.
+
+### Troubleshooting "Image not available"
+
+| Reason | Likely cause | What to do |
+| --- | --- | --- |
+| `registry answered 404 (image or tag not found)` | The tag isn't (yet) in the registry, or the image name is wrong | Check the tag in the registry; push before notifying; a longer wait if pushes take longer |
+| `registry answered 401 (authentication failed)` | A private image without credentials, or credentials that the registry or its token service refused | Check `registryCredentials` (see [Registries](#registries)) |
+| `registry answered 429 (rate limit reached; ...)` | The registry's rate limit, e.g., Docker Hub's for anonymous requests from a shared egress IP | Set `registryCredentials`; with `ratelimit-remaining: 0`, waiting longer rarely helps |
+| `registry or token service not reachable (ConnectionError)`, `(Timeout)`, `(SSLError)` | DNS, egress rules or a proxy between the cluster and the registry, or TLS interception | Check egress from the sidecar's namespace, e.g., with `curl -I https://registry-1.docker.io/v2/` in a pod there |
+| `token service answered unusably (JSONDecodeError)` | The registry's token service answered something other than a token | Check the registry; often a proxy's error page |
+
 ## Refusing downgrades
 
 By default, the sidecar rolls out any tag that a notification names, as long

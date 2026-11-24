@@ -52,6 +52,10 @@ spec:
             - name: ALLOWED_TAGS
               value: {{ . | quote }}
             {{- end }}
+            - name: IMAGE_WAIT_RETRIES
+              value: {{ .Values.imageWait.retries | int | quote }}
+            - name: IMAGE_WAIT_INTERVAL
+              value: {{ .Values.imageWait.interval | int | quote }}
             {{- with .Values.insecureRegistries }}
             - name: INSECURE_REGISTRIES
               value: {{ join "," . | quote }}

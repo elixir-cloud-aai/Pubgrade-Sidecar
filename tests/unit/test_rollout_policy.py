@@ -20,7 +20,10 @@ from pubgrade_sidecar.errors.exceptions import (
 TOKEN = "test-token"
 READ = "kubernetes.client.AppsV1Api.read_namespaced_deployment"
 PATCH = "kubernetes.client.AppsV1Api.patch_namespaced_deployment"
-CHECK = "pubgrade_sidecar.controllers.check_image_availability"
+CHECK = "pubgrade_sidecar.controllers.check_image"
+# Outcomes of the availability check
+AVAILABLE = controllers.ImageCheck(available=True)
+MISSING = controllers.ImageCheck(available=False, reason="registry answered 404")
 REPOSITORY = "elixircloud/tesk-api"
 DIGEST = "sha256:" + "a" * 64
 
@@ -215,7 +218,7 @@ def reader(deployments: dict[str, DefaultMunch]) -> Any:
     ],
 )
 @patch(PATCH, return_value=deployment("tesk-api", []))
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_upgrade_rolls_out(
     mock_check: MagicMock,
     mock_patch: MagicMock,
@@ -283,7 +286,7 @@ def test_upgrade_rolls_out(
     ],
 )
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_downgrade_refused(
     mock_check: MagicMock,
     mock_patch: MagicMock,
@@ -318,7 +321,7 @@ def test_same_tag_is_current(mock_patch: MagicMock, app: Flask, refuse: None) ->
 
 
 @patch(PATCH, return_value=deployment("tesk-api", []))
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_downgrade_allowed_by_default(
     mock_check: MagicMock, mock_patch: MagicMock, app: Flask
 ) -> None:
@@ -355,7 +358,7 @@ def test_unknown_setting_turns_it_on(
 
 
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_any_lower_container_refuses(
     mock_check: MagicMock, mock_patch: MagicMock, app: Flask, refuse: None
 ) -> None:
@@ -372,7 +375,7 @@ def test_any_lower_container_refuses(
 
 
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_container_with_the_tag_counts_no_more(
     mock_check: MagicMock, mock_patch: MagicMock, app: Flask, refuse: None
 ) -> None:
@@ -394,7 +397,7 @@ def test_container_with_the_tag_counts_no_more(
 
 
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_all_deployments_refused_together(
     mock_check: MagicMock, mock_patch: MagicMock, app: Flask, refuse: None
 ) -> None:
@@ -410,7 +413,7 @@ def test_all_deployments_refused_together(
 
 
 @patch(PATCH, return_value=deployment("tesk-api", []))
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_all_deployments_upgrade(
     mock_check: MagicMock, mock_patch: MagicMock, app: Flask, refuse: None
 ) -> None:
@@ -426,7 +429,7 @@ def test_all_deployments_upgrade(
 
 
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_refused_notification_keeps_waiting_delivery(
     mock_check: MagicMock,
     mock_patch: MagicMock,
@@ -467,7 +470,7 @@ def test_refused_notification_keeps_waiting_delivery(
 )
 @pytest.mark.parametrize("notify", [notify_one, notify_all])
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_waiting_delivery_not_undercut(
     mock_check: MagicMock,
     mock_patch: MagicMock,
@@ -495,7 +498,7 @@ def test_waiting_delivery_not_undercut(
 
 
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_waiting_delivery_refuses_all_deployments(
     mock_check: MagicMock,
     mock_patch: MagicMock,
@@ -521,7 +524,7 @@ def test_waiting_delivery_refuses_all_deployments(
 
 
 @patch(PATCH, return_value=deployment("tesk-api", []))
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_finished_delivery_not_compared(
     mock_check: MagicMock,
     mock_patch: MagicMock,
@@ -538,7 +541,7 @@ def test_finished_delivery_not_compared(
 
 
 @patch(PATCH, return_value=deployment("tesk-api", []))
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_waiting_delivery_ignored_by_default(
     mock_check: MagicMock,
     mock_patch: MagicMock,
@@ -555,7 +558,7 @@ def test_waiting_delivery_ignored_by_default(
 
 
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_upgraded_during_the_wait_fails_the_delivery(
     mock_check: MagicMock,
     mock_patch: MagicMock,
@@ -588,7 +591,7 @@ def test_upgraded_during_the_wait_fails_the_delivery(
     ],
 )
 @patch(PATCH, return_value=deployment("tesk-api", []))
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_allowed_tag_rolls_out(
     mock_check: MagicMock,
     mock_patch: MagicMock,
@@ -651,7 +654,7 @@ def test_invalid_pattern_refuses_all(
 
 
 @patch(PATCH, return_value=deployment("tesk-api", []))
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 def test_empty_pattern_allows_all(
     mock_check: MagicMock,
     mock_patch: MagicMock,
