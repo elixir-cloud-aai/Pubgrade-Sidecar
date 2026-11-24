@@ -1,6 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
+  "required": ["imageWait"],
   "properties": {
     "appName": {
       "type": "string",
@@ -41,6 +42,7 @@
     },
     "imageWait": {
       "type": "object",
+      "required": ["retries", "interval"],
       "properties": {
         "retries": {"type": "integer", "minimum": 0, "maximum": 100},
         "interval": {"type": "integer", "minimum": 1, "maximum": 3600}

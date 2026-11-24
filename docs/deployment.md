@@ -254,13 +254,15 @@ A notification usually arrives right after its image was pushed, so the
 sidecar answers it at once (202) and waits for the image in the background:
 it checks the registry once, then up to `imageWait.retries` more times (3 by
 default), `imageWait.interval` seconds apart (30 by default; whole seconds in
-the chart), so for about 90 seconds in all. Outside the chart, the settings
+the chart), so for about 90 seconds of pauses. Outside the chart, the settings
 are the environment variables `IMAGE_WAIT_RETRIES` (0 or more) and
 `IMAGE_WAIT_INTERVAL` (seconds above 0); an invalid value keeps its default,
 with a warning in the log. If the registry answers 429 or 503 with
 `Retry-After`, the next check waits that long instead, if it is longer than
-the interval; the waits never add up to more than `retries` x `interval`
-seconds, and a wait that wouldn't fit ends the delivery at once. With
+the interval; the pauses never add up to more than `retries` x `interval`
+seconds, and a pause that wouldn't fit ends the delivery at once. The checks
+themselves add their time: up to about 30 seconds each (three requests of at
+most 10 seconds) against a registry that doesn't answer. With
 `retries: 0`, the sidecar checks once and doesn't wait. The chart accepts 0 to
 100 retries and intervals of 1 to 3600 seconds. Each waiting delivery holds
 one of the sidecar's 16 workers, so keep the wait short.
@@ -287,6 +289,7 @@ e.g., "Image not available, or its registry not reachable: registry answered
 | `registry answered 401 (authentication failed)` | A private image without credentials, or credentials that the registry or its token service refused | Check `registryCredentials` (see [Registries](#registries)) |
 | `registry answered 429 (rate limit reached; ...)` | The registry's rate limit, e.g., Docker Hub's for anonymous requests from a shared egress IP | Set `registryCredentials`; with `ratelimit-remaining: 0`, waiting longer rarely helps |
 | `registry or token service not reachable (ConnectionError)`, `(Timeout)`, `(SSLError)` | DNS, egress rules or a proxy between the cluster and the registry, or TLS interception | Check egress from the sidecar's namespace, e.g., with `curl -I https://registry-1.docker.io/v2/` in a pod there |
+| `token service answered 429 (...)`, `token service answer too large`, `token service too slow` | The registry's token service (e.g., `auth.docker.io`) is rate-limited, down or slow | As for the registry's own 429; check the token service |
 | `token service answered unusably (JSONDecodeError)` | The registry's token service answered something other than a token | Check the registry; often a proxy's error page |
 
 ## Refusing downgrades

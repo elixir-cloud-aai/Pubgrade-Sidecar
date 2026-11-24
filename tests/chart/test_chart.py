@@ -98,6 +98,9 @@ def render(*settings: str) -> dict[str, dict[str, Any]]:
         ([*REQUIRED, "imageWait.interval=3601"], "imageWait"),
         ([*REQUIRED, "imageWait.interval=soon"], "imageWait"),
         ([*REQUIRED, "imageWait.interval=2.5"], "imageWait"),
+        ([*REQUIRED, "imageWait.retries=null"], "retries"),
+        ([*REQUIRED, "imageWait.interval=null"], "interval"),
+        ([*REQUIRED, "imageWait=null"], "imageWait"),
     ],
 )
 def test_incomplete_values_fail(settings: list[str], message: str) -> None:

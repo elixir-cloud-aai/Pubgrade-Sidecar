@@ -416,7 +416,8 @@ def test_token_response_too_large(mock_head: MagicMock) -> None:
     chunk = b" " * 65536
     token_response.iter_content.return_value = iter([chunk] * 100)
     with patch(GET, return_value=token_response):
-        assert not check_image_availability("org/app", "1")
+        result = controllers.check_image("org/app", "1")
+    assert result.reason == "token service answer too large"
     assert mock_head.call_count == 1
     token_response.close.assert_called_once()
 
@@ -549,7 +550,8 @@ def test_token_response_too_slow(
     clock = iter([0.0, 5.0, 11.0, 12.0])
     monkeypatch.setattr(controllers.time, "monotonic", lambda: next(clock))
     with patch(GET, return_value=token_response):
-        assert not check_image_availability("org/app", "1")
+        result = controllers.check_image("org/app", "1")
+    assert result.reason == "token service too slow"
     assert mock_head.call_count == 1
 
 
@@ -574,6 +576,31 @@ def test_reason_of_answer(mock_head: MagicMock, status: int, hint: str) -> None:
 @patch(HEAD, return_value=bearer())
 def test_reason_of_refused_token(mock_head: MagicMock, mock_get: MagicMock) -> None:
     """Test that a refused token request ends in the registry's 401."""
+    result = controllers.check_image("org/app", "1")
+    assert result.reason == "token service answered 403 (access denied)"
+
+
+@patch(GET)
+@patch(HEAD, return_value=bearer())
+def test_reason_of_rate_limited_token_service(
+    mock_head: MagicMock, mock_get: MagicMock
+) -> None:
+    """Test that a token service's rate limit is reported, with its wait."""
+    mock_get.return_value = response(
+        429, {"Retry-After": "60", "RateLimit-Remaining": "0"}
+    )
+    result = controllers.check_image("org/app", "1")
+    assert result.reason == (
+        "token service answered 429 (rate limit reached; retry-after: 60, "
+        "ratelimit-remaining: 0)"
+    )
+    assert result.retry_after == 60
+
+
+@patch(HEAD)
+def test_reason_of_failed_authentication(mock_head: MagicMock) -> None:
+    """Test that a 401 that no token or credentials answer is reported."""
+    mock_head.return_value = response(401)
     result = controllers.check_image("org/app", "1")
     assert result.reason == "registry answered 401 (authentication failed)"
 

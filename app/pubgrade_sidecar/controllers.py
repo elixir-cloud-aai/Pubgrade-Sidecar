@@ -112,7 +112,7 @@ STATUS_HINTS = {
     403: "access denied",
     404: "image or tag not found",
     429: "rate limit reached",
-    503: "registry unavailable",
+    503: "service unavailable",
 }
 # Values of `REFUSE_DOWNGRADES`; any other value counts as on
 SETTING_ON = frozenset({"1", "true", "yes", "on"})
@@ -1170,6 +1170,23 @@ def _insecure_registries() -> list[str]:
     ]
 
 
+class _TokenServiceError(Exception):
+    """Raised when a registry's token service refuses or fails to give a token.
+
+    Attributes:
+        check: Outcome of the image check, with the token service's reason.
+    """
+
+    def __init__(self, check: ImageCheck) -> None:
+        """Record the outcome.
+
+        Args:
+            check: Outcome of the image check.
+        """
+        super().__init__(check.reason)
+        self.check = check
+
+
 def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
     """Request a token from the token service that a registry names.
 
@@ -1191,6 +1208,8 @@ def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
         requests.RequestException: If the token service can't be reached.
         ValueError: If the response isn't JSON.
         AttributeError: If the response isn't a JSON object.
+        _TokenServiceError: If the token service answers other than 200, or
+            its answer is too large or too slow.
     """
     realm = fields["realm"]
     # Over HTTP, only an insecure registry's own token service, as the token
@@ -1210,13 +1229,17 @@ def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
     )
     try:
         if token_response.status_code != 200:
-            return None
+            raise _TokenServiceError(_answer_reason(token_response, "token service"))
         content = b""
         for chunk in token_response.iter_content(chunk_size=TOKEN_CHUNK_SIZE):
             content += chunk
             # Also a service that trickles its response stops in time
-            if len(content) > MAX_TOKEN_RESPONSE or time.monotonic() > deadline:
-                return None
+            if len(content) > MAX_TOKEN_RESPONSE:
+                raise _TokenServiceError(
+                    ImageCheck(False, "token service answer too large")
+                )
+            if time.monotonic() > deadline:
+                raise _TokenServiceError(ImageCheck(False, "token service too slow"))
     finally:
         token_response.close()
     body = json.loads(content)
@@ -1245,6 +1268,8 @@ def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
             can't be reached.
         ValueError: If the token service's response isn't JSON.
         AttributeError: If the token service's response isn't a JSON object.
+        _TokenServiceError: If the token service refuses or fails to give a
+            token.
     """
     headers = {"Accept": MANIFEST_TYPES}
     response = requests.head(
@@ -1334,11 +1359,12 @@ def _retry_after(value: str | None) -> float | None:
     return max(0.0, moment.timestamp() - time.time())
 
 
-def _answer_reason(response: requests.Response) -> ImageCheck:
-    """Explain an answer of a registry other than 200.
+def _answer_reason(response: requests.Response, source: str = "registry") -> ImageCheck:
+    """Explain an answer of a registry, or its token service, other than 200.
 
     Args:
-        response: The registry's answer.
+        response: The answer.
+        source: Who answered, for the reason.
 
     Returns:
         The outcome of the check, with the status, an explanation of it, and
@@ -1355,7 +1381,7 @@ def _answer_reason(response: requests.Response) -> ImageCheck:
     if remaining:
         details.append(f"ratelimit-remaining: {remaining}")
     parts = [part for part in (STATUS_HINTS.get(status), ", ".join(details)) if part]
-    reason = f"registry answered {status}"
+    reason = f"{source} answered {status}"
     if parts:
         reason += f" ({'; '.join(parts)})"
     return ImageCheck(
@@ -1390,6 +1416,8 @@ def check_image(image_repo: str, tag: str = "latest") -> ImageCheck:
     url = f"{scheme}://{host}/v2/{name}/manifests/{tag}"
     try:
         response = _head_manifest(url, host, scheme)
+    except _TokenServiceError as exc:
+        return exc.check
     except requests.RequestException as exc:
         return ImageCheck(
             available=False,
