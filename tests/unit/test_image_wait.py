@@ -299,3 +299,110 @@ def test_fractional_interval_keeps_all_checks(
         wait()
     assert mock_check.call_count == 4
     assert mock_sleep.call_count == 3
+
+
+def _answer(status: int, headers: dict[str, str] | None = None) -> MagicMock:
+    """Build a registry's answer of the `requests` library.
+
+    Args:
+        status: Status code.
+        headers: Headers.
+
+    Returns:
+        Object with the attributes used by the check.
+    """
+    answer = MagicMock()
+    answer.status_code = status
+    answer.headers = headers or {}
+    answer.history = []
+    answer.iter_content.return_value = [b'{"token": "secret-token"}']
+    return answer
+
+
+CHALLENGE = _answer(
+    401,
+    {
+        "WWW-Authenticate": (
+            'Bearer realm="https://auth.example.org/token",service="registry"'
+        )
+    },
+)
+
+
+@pytest.mark.parametrize(
+    "head,get,reason",
+    [
+        (
+            [CHALLENGE, _answer(404)],
+            _answer(200),
+            "registry answered 404 (image or tag not found)",
+        ),
+        (
+            [CHALLENGE],
+            _answer(401),
+            "token service answered 401 (authentication failed)",
+        ),
+        (
+            [CHALLENGE, _answer(429, {"RateLimit-Remaining": "0;w=3600"})],
+            _answer(200),
+            "registry answered 429 (rate limit reached; ratelimit-remaining: 0;w=3600)",
+        ),
+        (
+            controllers.requests.ConnectionError(
+                "https://user:password@registry.example.org/v2/"
+            ),
+            _answer(200),
+            "registry or token service not reachable (ConnectionError)",
+        ),
+        (
+            controllers.requests.Timeout("password=hunter2"),
+            _answer(200),
+            "registry or token service not reachable (Timeout)",
+        ),
+    ],
+)
+@patch(SLEEP)
+def test_outcome_logged_and_reported_without_secrets(
+    mock_sleep: MagicMock,
+    head: Any,
+    get: MagicMock,
+    reason: str,
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test each outcome end to end: logs per check, state, and no secrets.
+
+    With credentials configured, the real check runs against mocked
+    requests; each check is logged once with its reason, the delivery fails
+    with the reason in `detail`, and neither the logs nor the status carry
+    the token, the credentials or the URLs of errors.
+    """
+    auth = tmp_path / "config.json"
+    auth.write_text(
+        '{"auths": {"docker.io": {"username": "robot", '
+        '"password": "registry-password"}}}'
+    )
+    monkeypatch.setenv("REGISTRY_AUTH_FILE", str(auth))
+    monkeypatch.setenv("IMAGE_WAIT_RETRIES", "1")
+    monkeypatch.delenv("INSECURE_REGISTRIES", raising=False)
+    side_effect = head if isinstance(head, Exception) else head * 2
+    delivery = controllers._Delivery(image=f"{REPOSITORY}:1.2.0")
+    controllers._deliveries[KEY] = delivery
+    with (
+        patch("pubgrade_sidecar.controllers.requests.head", side_effect=side_effect),
+        patch("pubgrade_sidecar.controllers.requests.get", return_value=get),
+        caplog.at_level(logging.DEBUG),
+    ):
+        controllers._deliver(delivery, REPOSITORY, "1.2.0", "tesk-api")
+    checks = [message for message in caplog.messages if message.startswith("Check ")]
+    assert checks == [
+        f"Check {n} of 2 for image {REPOSITORY}:1.2.0 failed: {reason}" for n in (1, 2)
+    ]
+    assert delivery.state == "failed"
+    assert delivery.detail == (
+        f"Image not available, or its registry not reachable: {reason}."
+    )
+    for secret in ("secret-token", "registry-password", "robot", "hunter2", "user:"):
+        assert secret not in caplog.text
+        assert secret not in str(delivery.detail)
