@@ -368,9 +368,9 @@ components:
         detail:
           type: string
           description: Explanation, if the delivery failed, e.g., why the last
-           check for the image failed (the registry's status, with its
-           `Retry-After` and rate-limit headers, or the class of the network
-           error).
+           check for the image failed (the status of the registry or its
+           token service, with its `Retry-After` and rate-limit headers, or
+           the class of the network error).
       required:
         - image
         - status

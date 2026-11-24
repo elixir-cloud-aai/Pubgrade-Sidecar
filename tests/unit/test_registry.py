@@ -244,10 +244,11 @@ def test_credentials_to_insecure_registry_itself(
 )
 @patch(HEAD)
 def test_token_refused(mock_head: MagicMock, token_response: Any) -> None:
-    """Test that the image isn't available without a token."""
+    """Test that without a token, the image counts as unavailable, unretried."""
     mock_head.side_effect = [bearer(), response(200)]
     with patch(GET, return_value=token_response):
         assert not check_image_availability("org/app", "1")
+    assert mock_head.call_count == 1
 
 
 @patch(HEAD)
@@ -575,7 +576,7 @@ def test_reason_of_answer(mock_head: MagicMock, status: int, hint: str) -> None:
 @patch(GET, return_value=response(403))
 @patch(HEAD, return_value=bearer())
 def test_reason_of_refused_token(mock_head: MagicMock, mock_get: MagicMock) -> None:
-    """Test that a refused token request ends in the registry's 401."""
+    """Test that a refused token request is reported as the token service's."""
     result = controllers.check_image("org/app", "1")
     assert result.reason == "token service answered 403 (access denied)"
 

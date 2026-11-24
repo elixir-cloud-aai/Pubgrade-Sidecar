@@ -212,7 +212,7 @@ def test_retry_after_beyond_budget_gives_up(
         wait()
     mock_sleep.assert_not_called()
     assert error.value.reason == (
-        "registry answered 429 (retry-after: 91); the registry asks to wait 91 s, "
+        "registry answered 429 (retry-after: 91); it asks to wait 91 s, "
         "longer than the remaining wait of 90 s"
     )
 

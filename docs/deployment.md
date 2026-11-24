@@ -203,8 +203,9 @@ or with `--set podSecurityContext.seccompProfile=null`. An empty map
 default; `seccompProfile.type: null` does.
 
 Up to chart 0.2.0, the security contexts were fixed in the template. When
-upgrading a release installed with such a chart, don't use
-`helm upgrade --reuse-values`: it takes the old release's values instead of
+upgrading a release installed with such a chart, or with chart 0.3.0 (which
+lacks the required `imageWait`, see [Waiting for images](#waiting-for-images),
+so the upgrade fails), don't use `helm upgrade --reuse-values`: it takes the old release's values instead of
 the new chart's defaults, which have no security contexts, so the pod would
 run without them. Pass your values again (`-f`), or use
 `--reset-then-reuse-values` (Helm 3.14 or later).
@@ -257,7 +258,7 @@ default), `imageWait.interval` seconds apart (30 by default; whole seconds in
 the chart), so for about 90 seconds of pauses. Outside the chart, the settings
 are the environment variables `IMAGE_WAIT_RETRIES` (0 or more) and
 `IMAGE_WAIT_INTERVAL` (seconds above 0); an invalid value keeps its default,
-with a warning in the log. If the registry answers 429 or 503 with
+with a warning in the log. If the registry or its token service answers 429 or 503 with
 `Retry-After`, the next check waits that long instead, if it is longer than
 the interval; the pauses never add up to more than `retries` x `interval`
 seconds, and a pause that wouldn't fit ends the delivery at once. The checks
@@ -268,7 +269,7 @@ most 10 seconds) against a registry that doesn't answer. With
 one of the sidecar's 16 workers, so keep the wait short.
 
 Each failed check is logged at the level WARNING, with the reason: the
-registry's status code with a short explanation and its `Retry-After` and
+status code of the registry or its token service with a short explanation and its `Retry-After` and
 rate-limit headers, or the class of the network error (never tokens,
 credentials, URLs or error messages), e.g.:
 
@@ -286,7 +287,8 @@ e.g., "Image not available, or its registry not reachable: registry answered
 | Reason | Likely cause | What to do |
 | --- | --- | --- |
 | `registry answered 404 (image or tag not found)` | The tag isn't (yet) in the registry, or the image name is wrong | Check the tag in the registry; push before notifying; a longer wait if pushes take longer |
-| `registry answered 401 (authentication failed)` | A private image without credentials, or credentials that the registry or its token service refused | Check `registryCredentials` (see [Registries](#registries)) |
+| `registry answered 401 (authentication failed)` | A private image without credentials, or a token or credentials that the registry refused | Check `registryCredentials` (see [Registries](#registries)) |
+| `token service answered 401 (authentication failed)`, `token service answered 403 (access denied)` | Credentials that the registry's token service refused, or without pull rights on the repository | Check `registryCredentials` (see [Registries](#registries)) |
 | `registry answered 429 (rate limit reached; ...)` | The registry's rate limit, e.g., Docker Hub's for anonymous requests from a shared egress IP | Set `registryCredentials`; with `ratelimit-remaining: 0`, waiting longer rarely helps |
 | `registry or token service not reachable (ConnectionError)`, `(Timeout)`, `(SSLError)` | DNS, egress rules or a proxy between the cluster and the registry, or TLS interception | Check egress from the sidecar's namespace, e.g., with `curl -I https://registry-1.docker.io/v2/` in a pod there |
 | `token service answered 429 (...)`, `token service answer too large`, `token service too slow` | The registry's token service (e.g., `auth.docker.io`) is rate-limited, down or slow | As for the registry's own 429; check the token service |

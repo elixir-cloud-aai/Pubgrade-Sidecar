@@ -172,9 +172,9 @@ _lock = threading.Lock()
 # to the end of its patch, so that a delivery that a newer one replaced can't
 # overwrite the newer one's image; status reports don't wait for it
 _patch_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
-# Each delivery holds a worker while it waits for its image (by default about
-# 90 s, see `_image_wait`); a notification for all deployments starts one delivery
-# per deployment, and further ones wait for a free worker
+# Each delivery holds a worker while it waits for its image (by default
+# about 90 s, see `_image_wait`); a notification for all deployments starts
+# one delivery per deployment, and further ones wait for a free worker
 _executor = ThreadPoolExecutor(max_workers=16)
 
 
@@ -1074,7 +1074,7 @@ def _wait_for_image(
         if retry_after is not None and retry_after > interval:
             if retry_after > remaining + slack:
                 reason += (
-                    f"; the registry asks to wait {math.ceil(retry_after)} s, "
+                    f"; it asks to wait {math.ceil(retry_after)} s, "
                     f"longer than the remaining wait of {math.ceil(remaining)} s"
                 )
                 break
