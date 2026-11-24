@@ -256,22 +256,34 @@ sidecar answers it at once (202) and waits for the image in the background:
 it checks the registry once, then up to `imageWait.retries` more times (3 by
 default), `imageWait.interval` seconds apart (30 by default; whole seconds in
 the chart), so for about 90 seconds of pauses. Outside the chart, the settings
-are the environment variables `IMAGE_WAIT_RETRIES` (0 or more) and
-`IMAGE_WAIT_INTERVAL` (seconds above 0); an invalid value keeps its default,
-with a warning in the log. If the registry or its token service answers 429 or 503 with
-`Retry-After`, the next check waits that long instead, if it is longer than
-the interval; the pauses never add up to more than `retries` x `interval`
-seconds, and a pause that wouldn't fit ends the delivery at once. The checks
-themselves add their time: up to about 30 seconds each (three requests of at
-most 10 seconds) against a registry that doesn't answer. With
-`retries: 0`, the sidecar checks once and doesn't wait. The chart accepts 0 to
-100 retries and intervals of 1 to 3600 seconds. Each waiting delivery holds
-one of the sidecar's 16 workers, so keep the wait short.
+are the environment variables `IMAGE_WAIT_RETRIES` (0 to 100) and
+`IMAGE_WAIT_INTERVAL` (seconds above 0, up to 3600), the same ranges as in
+the chart; an invalid or out-of-range value keeps its default, with a warning
+in the log. With `retries: 0`, the sidecar checks once and doesn't wait.
+
+If the registry or its token service answers 429 or 503 with `Retry-After`,
+the next check waits that long instead, if it is longer than the interval.
+The pauses never add up to more than `retries` x `interval` seconds, and a
+pause that wouldn't fit ends the delivery at once. A delivery that a newer
+notification replaces stops within 5 seconds, also during a long pause, and
+frees its worker. Each waiting delivery holds one of the sidecar's 16
+workers, so keep the wait short.
+
+The checks themselves add their time. Each request has a timeout of 10
+seconds for connecting and for each read; a check makes up to three requests
+(the manifest, a token, the manifest again), so a registry that doesn't
+answer costs about 30 seconds per check. A registry that answers very slowly
+but steadily, or through a chain of redirects, can take longer, as the
+timeout applies per read, not to the whole check; registries come from the
+notifications of your own Pubgrade, for the Deployments' own images.
 
 Each failed check is logged at the level WARNING, with the reason: the
-status code of the registry or its token service with a short explanation and its `Retry-After` and
-rate-limit headers, or the class of the network error (never tokens,
-credentials, URLs or error messages), e.g.:
+status code of the registry or its token service with a short explanation,
+and its `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining` and
+`RateLimit-Reset` headers (or their `X-` forms), each only if its value has
+the header's own syntax (seconds or an HTTP date; numbers with an optional
+window, e.g., `100;w=3600`); or the class of the network error. Tokens,
+credentials, URLs and error messages never appear, e.g.:
 
 ```text
 Check 1 of 4 for image elixircloud/tesk-api:2.0.0 failed: registry answered 429 (rate limit reached; ratelimit-remaining: 0;w=3600)
@@ -292,7 +304,7 @@ e.g., "Image not available, or its registry not reachable: registry answered
 | `registry answered 429 (rate limit reached; ...)` | The registry's rate limit, e.g., Docker Hub's for anonymous requests from a shared egress IP | Set `registryCredentials`; with `ratelimit-remaining: 0`, waiting longer rarely helps |
 | `registry or token service not reachable (ConnectionError)`, `(Timeout)`, `(SSLError)` | DNS, egress rules or a proxy between the cluster and the registry, or TLS interception | Check egress from the sidecar's namespace, e.g., with `curl -I https://registry-1.docker.io/v2/` in a pod there |
 | `token service answered 429 (...)`, `token service answer too large`, `token service too slow` | The registry's token service (e.g., `auth.docker.io`) is rate-limited, down or slow | As for the registry's own 429; check the token service |
-| `token service answered unusably (JSONDecodeError)` | The registry's token service answered something other than a token | Check the registry; often a proxy's error page |
+| `token service answered unusably (JSONDecodeError)`, `token service answered no token` | The registry's token service answered something other than a token | Check the registry; often a proxy's error page |
 
 ## Refusing downgrades
 

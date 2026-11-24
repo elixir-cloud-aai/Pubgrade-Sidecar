@@ -57,6 +57,9 @@ def default_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """
     monkeypatch.delenv("IMAGE_WAIT_RETRIES", raising=False)
     monkeypatch.delenv("IMAGE_WAIT_INTERVAL", raising=False)
+    # One sleep per pause, so that the tests see each pause as a whole (the
+    # steps have tests of their own)
+    monkeypatch.setattr(controllers, "PAUSE_STEP", 1e9)
     controllers._deliveries.clear()
     yield
     controllers._deliveries.clear()
@@ -112,6 +115,9 @@ def test_settings_read(
         ("IMAGE_WAIT_INTERVAL", "nan"),
         ("IMAGE_WAIT_INTERVAL", "inf"),
         ("IMAGE_WAIT_INTERVAL", "soon"),
+        ("IMAGE_WAIT_RETRIES", "101"),
+        ("IMAGE_WAIT_INTERVAL", "3601"),
+        ("IMAGE_WAIT_INTERVAL", "1e20"),
     ],
 )
 def test_invalid_settings_fall_back(
@@ -483,3 +489,30 @@ def _status_report() -> dict[str, Any]:
     app = Flask(__name__)
     with app.test_request_context("url", headers={"X-Access-Token": "test-token"}):
         return cast(dict[str, Any], controllers.getImage("tesk-api").json)
+
+
+@patch(SLEEP)
+def test_pause_in_steps(mock_sleep: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that a pause sleeps in steps of at most `PAUSE_STEP` seconds."""
+    monkeypatch.setattr(controllers, "PAUSE_STEP", 5.0)
+    delivery = controllers._Delivery(image=f"{REPOSITORY}:1.2.0")
+    controllers._deliveries[KEY] = delivery
+    assert controllers._pause(12.0, delivery, "tesk-api", REPOSITORY)
+    assert [call.args for call in mock_sleep.call_args_list] == [(5.0,), (5.0,), (2.0,)]
+
+
+@patch(SLEEP)
+def test_pause_ends_when_replaced(
+    mock_sleep: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that a replaced delivery stops its pause after the current step."""
+    monkeypatch.setattr(controllers, "PAUSE_STEP", 5.0)
+    delivery = controllers._Delivery(image=f"{REPOSITORY}:1.2.0")
+    controllers._deliveries[KEY] = delivery
+
+    def replace(*_: Any) -> None:
+        controllers._deliveries[KEY] = controllers._Delivery(image="other")
+
+    mock_sleep.side_effect = replace
+    assert not controllers._pause(3600.0, delivery, "tesk-api", REPOSITORY)
+    mock_sleep.assert_called_once_with(5.0)

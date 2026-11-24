@@ -298,7 +298,9 @@ def test_image_never_available(
     monkeypatch.setattr(controllers, "_executor", ImmediateExecutor())
     notify(app, "elixircloud/tesk-api")
     assert mock_check.call_count == controllers.IMAGE_WAIT_RETRIES + 1
-    assert mock_sleep.call_count == controllers.IMAGE_WAIT_RETRIES
+    assert sum(call.args[0] for call in mock_sleep.call_args_list) == (
+        controllers.IMAGE_WAIT_RETRIES * controllers.IMAGE_WAIT_INTERVAL
+    )
     mock_patch.assert_not_called()
     result = status(app)
     assert result["status"] == "failed"

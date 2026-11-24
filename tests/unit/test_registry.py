@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import threading
 import time
 from typing import Any, ClassVar
@@ -625,7 +626,7 @@ def test_reason_of_rate_limit(mock_head: MagicMock, mock_get: MagicMock) -> None
     assert not result.available
     assert result.reason == (
         "registry answered 429 (rate limit reached; retry-after: 120, "
-        "ratelimit-remaining: 0;w=3600)"
+        "ratelimit-limit: 100;w=3600, ratelimit-remaining: 0;w=3600)"
     )
     assert result.retry_after == 120
     assert "secret-token" not in str(result)
@@ -701,10 +702,57 @@ def test_long_retry_after_date_honoured(mock_head: MagicMock) -> None:
     mock_head.return_value = response(429, {"Retry-After": date})
     result = controllers.check_image("org/app", "1")
     assert result.retry_after is not None
-    with patch.object(controllers, "HEADER_VALUE", controllers.re.compile("x")):
+    unquotable = {**controllers.QUOTED_HEADERS, "retry-after": re.compile("x")}
+    with patch.object(controllers, "QUOTED_HEADERS", unquotable):
         unquoted = controllers.check_image("org/app", "1")
     assert unquoted.reason == "registry answered 429 (rate limit reached)"
     assert unquoted.retry_after is not None
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Retry-After": "https://evil.example.org/x"},
+        {"RateLimit-Remaining": "user:pw@host"},
+        {"RateLimit-Limit": "100;w=3600 https://x"},
+        {"RateLimit-Reset": "soon"},
+    ],
+)
+@patch(HEAD)
+def test_header_values_need_their_syntax(
+    mock_head: MagicMock, headers: dict[str, str]
+) -> None:
+    """Test that only values of a header's own syntax are quoted."""
+    mock_head.return_value = response(429, headers)
+    result = controllers.check_image("org/app", "1")
+    assert result.reason == "registry answered 429 (rate limit reached)"
+
+
+@patch(HEAD)
+def test_all_rate_limit_headers_quoted(mock_head: MagicMock) -> None:
+    """Test that limit, remaining and reset are quoted, also as `X-` headers."""
+    mock_head.return_value = response(
+        429,
+        {
+            "X-RateLimit-Limit": "100;w=3600",
+            "X-RateLimit-Remaining": "0;w=3600",
+            "X-RateLimit-Reset": "1800",
+        },
+    )
+    result = controllers.check_image("org/app", "1")
+    assert result.reason == (
+        "registry answered 429 (rate limit reached; ratelimit-limit: 100;w=3600, "
+        "ratelimit-remaining: 0;w=3600, ratelimit-reset: 1800)"
+    )
+
+
+@pytest.mark.parametrize("body", [{}, {"token": ""}, {"token": 5}])
+@patch(HEAD, return_value=bearer())
+def test_reason_of_missing_token(mock_head: MagicMock, body: Any) -> None:
+    """Test that a token service's answer without a token is reported."""
+    with patch(GET, return_value=response(200, body=body)):
+        result = controllers.check_image("org/app", "1")
+    assert result.reason == "token service answered no token"
 
 
 @pytest.mark.parametrize(

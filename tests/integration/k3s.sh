@@ -411,11 +411,13 @@ expect "Deployment unchanged while waiting" "|${TARGET_REPO}:${NEW_TAG}|" \
 out="$(await_report site-a '.status == "failed"')"
 expect "status failed" '"status":"failed"' "${out}"
 # The sidecar's explanation of a missing image, with the reason of the last
-# check (404, or 429 if the runner's IP hit Docker Hub's rate limit)
+# check: 404, or 429 if the runner's IP hit Docker Hub's rate limit, with its
+# explanation
 expect "failure explained" \
   '|true|' \
-  "|$(jq --raw-output '.detail | startswith(
-    "Image not available, or its registry not reachable: registry answered ")' \
+  "|$(jq --raw-output '.detail | test(
+    "^Image not available, or its registry not reachable: registry answered "
+    + "(404 [(]image or tag not found[)]|429 [(]rate limit reached[;)].*)[.]$")' \
     <<< "${out}")|"
 expect "Deployment unchanged after the failure" "|${TARGET_REPO}:${NEW_TAG}|" \
   "|$(image_of site-a tesk-api)|"

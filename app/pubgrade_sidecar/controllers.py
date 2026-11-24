@@ -67,9 +67,15 @@ _load_kube_config()
 
 apiV1 = client.AppsV1Api()
 # Defaults of the wait for a notified image: checks after the first, and
-# seconds between them (`IMAGE_WAIT_RETRIES`, `IMAGE_WAIT_INTERVAL`)
+# seconds between them (`IMAGE_WAIT_RETRIES`, `IMAGE_WAIT_INTERVAL`), and the
+# largest values that are accepted, as in the chart
 IMAGE_WAIT_RETRIES = 3
 IMAGE_WAIT_INTERVAL = 30.0
+MAX_IMAGE_WAIT_RETRIES = 100
+MAX_IMAGE_WAIT_INTERVAL = 3600.0
+# Longest single sleep of a pause between checks: after each, a delivery that
+# a newer one replaced stops, so that it frees its worker
+PAUSE_STEP = 5.0
 REQUEST_TIMEOUT = 10
 # Hosts of Docker Hub in image names, as Pubgrade counts them
 DOCKER_HUB_PREFIXES = ("docker.io/", "index.docker.io/", "registry-1.docker.io/")
@@ -98,10 +104,20 @@ TOKEN_CHUNK_SIZE = 4096
 CHALLENGE_PARAMETER = re.compile(r'(\w+)="([^"]*)"')
 # The format of Docker image tags
 VALID_TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
-# Header values that the reason of a failed check quotes; others, e.g., with
-# line breaks or longer ones, are left out, so that a registry can't write
-# into the logs
-HEADER_VALUE = re.compile(r"[A-Za-z0-9 ;=,.:/_+-]{1,64}")
+# Headers that the reason of a failed check quotes, in this order, with the
+# syntax that their values must have: others, e.g., with URLs, line breaks or
+# longer ones, are left out, so that a registry can't write into the logs.
+# `Retry-After` is seconds or an HTTP date; the rate-limit headers are
+# numbers with an optional window (`100;w=3600`), as Docker Hub sends them
+QUOTED_HEADERS = {
+    "retry-after": re.compile(
+        r"[0-9]{1,12}|[A-Z][a-z]{2}, [0-9]{2} [A-Z][a-z]{2} [0-9]{4} "
+        r"[0-9]{2}:[0-9]{2}:[0-9]{2} (GMT|[+-][0-9]{4})"
+    ),
+    "ratelimit-limit": re.compile(r"[0-9]{1,12}(;w=[0-9]{1,12})?"),
+    "ratelimit-remaining": re.compile(r"[0-9]{1,12}(;w=[0-9]{1,12})?"),
+    "ratelimit-reset": re.compile(r"[0-9]{1,12}"),
+}
 # `Retry-After` in seconds (otherwise, it is an HTTP date)
 DELAY_SECONDS = re.compile(r"[0-9]{1,12}")
 # Answers of registries after which `Retry-After` counts
@@ -998,10 +1014,11 @@ def _image_wait() -> tuple[int, float]:
             retries = int(value)
         except ValueError:
             retries = -1
-        if retries < 0:
+        if not 0 <= retries <= MAX_IMAGE_WAIT_RETRIES:
             retries = IMAGE_WAIT_RETRIES
             logger.warning(
-                "IMAGE_WAIT_RETRIES isn't a whole number of 0 or more; using %d.",
+                "IMAGE_WAIT_RETRIES isn't a whole number from 0 to %d; using %d.",
+                MAX_IMAGE_WAIT_RETRIES,
                 retries,
             )
     interval = IMAGE_WAIT_INTERVAL
@@ -1011,13 +1028,41 @@ def _image_wait() -> tuple[int, float]:
             interval = float(value)
         except ValueError:
             interval = -1.0
-        if not (math.isfinite(interval) and interval > 0):
+        if not (math.isfinite(interval) and 0 < interval <= MAX_IMAGE_WAIT_INTERVAL):
             interval = IMAGE_WAIT_INTERVAL
             logger.warning(
-                "IMAGE_WAIT_INTERVAL isn't a number of seconds above 0; using %g.",
+                "IMAGE_WAIT_INTERVAL isn't a number of seconds above 0 and up to "
+                "%g; using %g.",
+                MAX_IMAGE_WAIT_INTERVAL,
                 interval,
             )
     return retries, interval
+
+
+def _pause(
+    seconds: float, delivery: _Delivery, deployment_name: str, image_repo: str
+) -> bool:
+    """Wait between checks, while a delivery is current.
+
+    Sleeps in steps of at most `PAUSE_STEP` seconds, so that a delivery that
+    a newer notification replaced stops soon and frees its worker.
+
+    Args:
+        seconds: Seconds to wait.
+        delivery: Record of the delivery.
+        deployment_name: Name of the deployment.
+        image_repo: Canonical repository of the image.
+
+    Returns:
+        True after the whole wait, False as soon as the delivery was replaced.
+    """
+    while seconds > 0:
+        step = min(seconds, PAUSE_STEP)
+        time.sleep(step)
+        seconds -= step
+        if not _is_current(delivery, deployment_name, image_repo):
+            return False
+    return True
 
 
 def _wait_for_image(
@@ -1087,7 +1132,8 @@ def _wait_for_image(
                     f"remaining wait of {math.ceil(remaining)} s"
                 )
                 break
-        time.sleep(delay)
+        if not _pause(delay, delivery, deployment_name, image_repo):
+            return False
         remaining -= delay
     raise ImageUnavailable(reason)
 
@@ -1208,8 +1254,8 @@ def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
         requests.RequestException: If the token service can't be reached.
         ValueError: If the response isn't JSON.
         AttributeError: If the response isn't a JSON object.
-        _TokenServiceError: If the token service answers other than 200, or
-            its answer is too large or too slow.
+        _TokenServiceError: If the token service answers other than 200,
+            without a token, or too much or too slowly.
     """
     realm = fields["realm"]
     # Over HTTP, only an insecure registry's own token service, as the token
@@ -1244,7 +1290,9 @@ def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
         token_response.close()
     body = json.loads(content)
     token = body.get("token") or body.get("access_token")
-    return token if isinstance(token, str) and token else None
+    if not (isinstance(token, str) and token):
+        raise _TokenServiceError(ImageCheck(False, "token service answered no token"))
+    return token
 
 
 def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
@@ -1328,11 +1376,25 @@ def _header(response: requests.Response, name: str) -> str | None:
         name: Name of the header, in lower case.
 
     Returns:
-        The value, or None if the header is missing or its value isn't one
-        that may be quoted (see `HEADER_VALUE`).
+        The value, or None if the header is missing or its value hasn't the
+        header's syntax (see `QUOTED_HEADERS`).
     """
     value = _raw_header(response, name)
-    return value if value and HEADER_VALUE.fullmatch(value) else None
+    return value if value and QUOTED_HEADERS[name].fullmatch(value) else None
+
+
+def _x_header(response: requests.Response, name: str) -> str | None:
+    """Read the older `X-` form of a rate-limit header, with its syntax.
+
+    Args:
+        response: The registry's answer.
+        name: Name of the header without `x-`, in lower case.
+
+    Returns:
+        The value, or None if missing or not of the header's syntax.
+    """
+    value = _raw_header(response, f"x-{name}")
+    return value if value and QUOTED_HEADERS[name].fullmatch(value) else None
 
 
 def _retry_after(value: str | None) -> float | None:
@@ -1371,15 +1433,13 @@ def _answer_reason(response: requests.Response, source: str = "registry") -> Ima
         the registry's `Retry-After` and rate-limit headers, if any.
     """
     status = response.status_code
-    retry_after = _header(response, "retry-after")
-    remaining = _header(response, "ratelimit-remaining") or _header(
-        response, "x-ratelimit-remaining"
-    )
     details = []
-    if retry_after:
-        details.append(f"retry-after: {retry_after}")
-    if remaining:
-        details.append(f"ratelimit-remaining: {remaining}")
+    for name in QUOTED_HEADERS:
+        value = _header(response, name)
+        if value is None and name.startswith("ratelimit-"):
+            value = _x_header(response, name)
+        if value:
+            details.append(f"{name}: {value}")
     parts = [part for part in (STATUS_HINTS.get(status), ", ".join(details)) if part]
     reason = f"{source} answered {status}"
     if parts:
