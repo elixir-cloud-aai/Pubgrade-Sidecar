@@ -20,6 +20,8 @@ OpenShift.
   and upgrade from chart version 0.1.
 - [API](api.md): the calls, their status codes, the errors and the status
   report of a delivery.
+- [Canary](canary.md): the scheduled smoke test of automatic upgrades on the
+  live deployments, how to add a site, and how to stop it.
 - [Development](development.md): the development setup, the checks and the
   documentation.
 - [Code reference](reference.md): the app factory, the controllers and the

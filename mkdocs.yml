@@ -74,6 +74,7 @@ nav:
   - Home: index.md
   - Deployment: deployment.md
   - API: api.md
+  - Canary: canary.md
   - Development: development.md
   - Releases:
       - "0.3.0": releases/0.3.0.md

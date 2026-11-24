@@ -1,6 +1,7 @@
 # Everything that must pass on pull requests and pushes to `dev`: the pull
 # request title, lint, types and the lock, the unit tests with their coverage,
-# the documentation, the image and its known vulnerabilities, the chart, and
+# the documentation, the image and its known vulnerabilities, the canary
+# image (`canary.yml` pushes it), the chart, and
 # the image and chart together on a real cluster; on pushes, publish the image.
 # The gate `passed` ("CI passed") is the only check to require. No `paths:`
 # filters, so that the gate always reports; skip jobs with `if:` instead (and
@@ -224,6 +225,45 @@ jobs:
         if: failure()
         run: docker logs sidecar
 
+  # Builds the canary image (`canary/`, pushed by `canary.yml`) and checks
+  # that it serves its version as an arbitrary non-root user, as on
+  # OpenShift, and that its build refuses a version that isn't X.Y.Z
+  canary:
+    name: Canary image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build canary
+        run: |
+          docker build --tag canary:ci --build-arg VERSION=1.0.42 \
+            --build-arg COMMIT="${GITHUB_SHA}" canary
+      - name: Check that the build refuses other versions
+        run: |
+          if docker build --build-arg 'VERSION=1.0.42", "x": "y' canary; then
+            echo "::error::The build accepted an invalid version"
+            exit 1
+          fi
+      - name: Start canary as an arbitrary user
+        run: |
+          docker run --detach --name canary --user 123456:0 \
+            --publish 8080:8080 canary:ci
+      - name: Check the version it serves
+        run: |
+          body="$(curl --fail --silent --show-error --retry 10 \
+            --retry-delay 1 --retry-all-errors http://localhost:8080/version.json)"
+          expected="{\"version\": \"1.0.42\", \"commit\": \"${GITHUB_SHA}\"}"
+          if [ "${body}" != "${expected}" ]; then
+            echo "::error::Expected ${expected}, got ${body}"
+            exit 1
+          fi
+      - name: Show canary logs
+        if: failure()
+        run: docker logs canary
+
   # Builds the image from the commit and scans it for known vulnerabilities
   # (shared action of elixir-cloud-aai/.github): fixable findings go to code
   # scanning, except for pull requests from forks, whose tokens can't upload.
@@ -396,7 +436,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [title, lint, test, docs, smoke, scan, integration, chart, publish]
+    needs: [title, lint, test, docs, smoke, canary, scan, integration, chart, publish]
     permissions: {}
     steps:
       - name: Check results of all jobs

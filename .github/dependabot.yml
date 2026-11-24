@@ -52,6 +52,15 @@ updates:
     groups:
       docker:
         patterns: ["*"]
+  # The canary's base image (`canary/Dockerfile`, BusyBox; tag and digest)
+  - package-ecosystem: docker
+    directory: /canary
+    labels: ["type: dependencies"]
+    schedule:
+      interval: monthly
+    groups:
+      canary:
+        patterns: ["*"]
   # Hook revisions in `.pre-commit-config.yaml`
   - package-ecosystem: pre-commit
     directory: /
