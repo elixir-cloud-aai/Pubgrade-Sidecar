@@ -1,16 +1,24 @@
 """Tests for the wait for a notified image: its settings, logs and reasons."""
 
 from collections.abc import Iterator
+import json
 import logging
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+from flask import Flask
 import pytest
+import requests
 
 from pubgrade_sidecar import controllers
 from pubgrade_sidecar.errors.exceptions import ImageUnavailable
+from tests.unit.test_delivery import deployment
 
 CHECK = "pubgrade_sidecar.controllers.check_image"
+HEAD = "pubgrade_sidecar.controllers.requests.head"
+GET = "pubgrade_sidecar.controllers.requests.get"
+READ = "kubernetes.client.AppsV1Api.read_namespaced_deployment"
 SLEEP = "pubgrade_sidecar.controllers.time.sleep"
 REPOSITORY = "elixircloud/tesk-api"
 KEY = ("tesk-api", REPOSITORY)
@@ -319,64 +327,94 @@ def _answer(status: int, headers: dict[str, str] | None = None) -> MagicMock:
     return answer
 
 
-CHALLENGE = _answer(
-    401,
-    {
-        "WWW-Authenticate": (
-            'Bearer realm="https://auth.example.org/token",service="registry"'
-        )
-    },
-)
+def _challenge() -> MagicMock:
+    """Build a registry's answer that asks for a bearer token.
+
+    Returns:
+        The answer.
+    """
+    return _answer(
+        401,
+        {
+            "WWW-Authenticate": (
+                'Bearer realm="https://auth.example.org/token",service="registry"'
+            )
+        },
+    )
 
 
-@pytest.mark.parametrize(
-    "head,get,reason",
-    [
-        (
-            [CHALLENGE, _answer(404)],
-            _answer(200),
-            "registry answered 404 (image or tag not found)",
-        ),
-        (
-            [CHALLENGE],
-            _answer(401),
-            "token service answered 401 (authentication failed)",
-        ),
-        (
-            [CHALLENGE, _answer(429, {"RateLimit-Remaining": "0;w=3600"})],
-            _answer(200),
-            "registry answered 429 (rate limit reached; ratelimit-remaining: 0;w=3600)",
-        ),
-        (
-            controllers.requests.ConnectionError(
-                "https://user:password@registry.example.org/v2/"
-            ),
-            _answer(200),
-            "registry or token service not reachable (ConnectionError)",
-        ),
-        (
-            controllers.requests.Timeout("password=hunter2"),
-            _answer(200),
-            "registry or token service not reachable (Timeout)",
-        ),
-    ],
-)
+ERROR_URL = "https://user:hunter2@registry.example.org/v2/"
+# Per outcome: answers of the registry to the HEADs of one check (or the error
+# they raise), status of the token service, reason, and whether the token
+# service is asked (with the credentials)
+OUTCOMES = [
+    pytest.param(
+        [(401, True), (404, False)],
+        200,
+        "registry answered 404 (image or tag not found)",
+        True,
+        id="404",
+    ),
+    pytest.param(
+        [(401, True)],
+        401,
+        "token service answered 401 (authentication failed)",
+        True,
+        id="token-401",
+    ),
+    pytest.param(
+        [(401, True), (429, False)],
+        200,
+        "registry answered 429 (rate limit reached; ratelimit-remaining: 0;w=3600)",
+        True,
+        id="429",
+    ),
+    pytest.param(
+        requests.ConnectionError(ERROR_URL),
+        200,
+        "registry or token service not reachable (ConnectionError)",
+        False,
+        id="connection-error",
+    ),
+    pytest.param(
+        requests.Timeout(ERROR_URL),
+        200,
+        "registry or token service not reachable (Timeout)",
+        False,
+        id="timeout",
+    ),
+]
+
+
+@pytest.mark.parametrize("heads,token_status,reason,asks_token", OUTCOMES)
 @patch(SLEEP)
 def test_outcome_logged_and_reported_without_secrets(
     mock_sleep: MagicMock,
-    head: Any,
-    get: MagicMock,
+    heads: list[tuple[int, bool]] | Exception,
+    token_status: int,
     reason: str,
-    tmp_path: Any,
+    asks_token: bool,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test each outcome end to end: logs per check, state, and no secrets.
 
-    With credentials configured, the real check runs against mocked
-    requests; each check is logged once with its reason, the delivery fails
-    with the reason in `detail`, and neither the logs nor the status carry
-    the token, the credentials or the URLs of errors.
+    The real check runs against mocked requests, with credentials
+    configured; each check is logged once with its reason, the delivery
+    fails with the reason in its status, and neither the logs nor the status
+    report carry the token, the credentials or the URLs of errors.
+
+    Args:
+        mock_sleep: Mock of the wait between checks.
+        heads: Per HEAD of one check, its status and whether it asks for a
+            bearer token; or the error that every HEAD raises.
+        token_status: Status of the token service's answer.
+        reason: Expected reason of each failed check.
+        asks_token: Whether the token service is asked, with credentials.
+        tmp_path: Directory for the credentials.
+        monkeypatch: Fixture for changing the environment.
+        caplog: Fixture that captures the logs.
     """
     auth = tmp_path / "config.json"
     auth.write_text(
@@ -386,23 +424,62 @@ def test_outcome_logged_and_reported_without_secrets(
     monkeypatch.setenv("REGISTRY_AUTH_FILE", str(auth))
     monkeypatch.setenv("IMAGE_WAIT_RETRIES", "1")
     monkeypatch.delenv("INSECURE_REGISTRIES", raising=False)
-    side_effect = head if isinstance(head, Exception) else head * 2
+    if isinstance(heads, Exception):
+        head_effect: Any = heads
+    else:
+        # Fresh answers for each of the two checks
+        head_effect = [
+            _challenge()
+            if challenge
+            else _answer(status)
+            if status != 429
+            else _answer(status, {"RateLimit-Remaining": "0;w=3600"})
+            for _ in range(2)
+            for status, challenge in heads
+        ]
     delivery = controllers._Delivery(image=f"{REPOSITORY}:1.2.0")
     controllers._deliveries[KEY] = delivery
     with (
-        patch("pubgrade_sidecar.controllers.requests.head", side_effect=side_effect),
-        patch("pubgrade_sidecar.controllers.requests.get", return_value=get),
+        patch(HEAD, side_effect=head_effect),
+        patch(GET, side_effect=lambda *_, **__: _answer(token_status)) as mock_get,
+        patch(READ, return_value=deployment()),
         caplog.at_level(logging.DEBUG),
     ):
         controllers._deliver(delivery, REPOSITORY, "1.2.0", "tesk-api")
+        report = _status_report()
     checks = [message for message in caplog.messages if message.startswith("Check ")]
     assert checks == [
         f"Check {n} of 2 for image {REPOSITORY}:1.2.0 failed: {reason}" for n in (1, 2)
     ]
+    mock_sleep.assert_called_once()
     assert delivery.state == "failed"
-    assert delivery.detail == (
+    assert report["detail"] == (
         f"Image not available, or its registry not reachable: {reason}."
     )
-    for secret in ("secret-token", "registry-password", "robot", "hunter2", "user:"):
-        assert secret not in caplog.text
-        assert secret not in str(delivery.detail)
+    if asks_token:
+        assert mock_get.call_count == 2
+        assert mock_get.call_args.kwargs["auth"] == ("robot", "registry-password")
+    else:
+        mock_get.assert_not_called()
+    shown = caplog.text + json.dumps(report)
+    for secret in (
+        "secret-token",
+        "registry-password",
+        "robot",
+        "hunter2",
+        "user:",
+        "registry.example.org",
+        "https://",
+    ):
+        assert secret not in shown
+
+
+def _status_report() -> dict[str, Any]:
+    """Get the status report of the deployment, as the API returns it.
+
+    Returns:
+        The report.
+    """
+    app = Flask(__name__)
+    with app.test_request_context("url", headers={"X-Access-Token": "test-token"}):
+        return cast(dict[str, Any], controllers.getImage("tesk-api").json)
