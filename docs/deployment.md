@@ -260,8 +260,10 @@ are the environment variables `IMAGE_WAIT_RETRIES` (0 or more) and
 with a warning in the log. If the registry answers 429 or 503 with
 `Retry-After`, the next check waits that long instead, if it is longer than
 the interval; the waits never add up to more than `retries` x `interval`
-seconds, and a wait that wouldn't fit ends the delivery at once. Each waiting
-delivery holds one of the sidecar's 16 workers, so keep the wait short.
+seconds, and a wait that wouldn't fit ends the delivery at once. With
+`retries: 0`, the sidecar checks once and doesn't wait. The chart accepts 0 to
+100 retries and intervals of 1 to 3600 seconds. Each waiting delivery holds
+one of the sidecar's 16 workers, so keep the wait short.
 
 Each failed check is logged at the level WARNING, with the reason: the
 registry's status code with a short explanation and its `Retry-After` and
@@ -334,7 +336,8 @@ default, and a notification they refuse changes nothing and gets a 409:
       version, it is refused, so that, e.g., a notification of the current
       tag doesn't cancel a waiting release. In turn, a waiting higher tag,
       even one that never appears in the registry, refuses lower
-      notifications until it fails (after about two minutes); `allowedTags`
+      notifications until it fails (after the [wait for its
+      image](#waiting-for-images), by default about 90 s); `allowedTags`
       doesn't change that.
     - **Values:** `true`, `1`, `yes` and `on` turn it on, and `false`, `0`,
       `no`, `off` and an empty value leave it off (in any case); any other

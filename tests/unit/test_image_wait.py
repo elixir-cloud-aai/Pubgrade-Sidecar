@@ -271,7 +271,7 @@ def test_reason_in_status(
     )
     assert (
         "Image elixircloud/tesk-api:1.2.0 isn't available: registry answered 429 "
-        "(rate limit reached; ratelimit-remaining: 0)"
+        "(rate limit reached; ratelimit-remaining: 0)."
     ) in caplog.messages
     mock_read.assert_not_called()
 
@@ -283,3 +283,19 @@ def test_unavailable_without_reason() -> None:
     with patch.object(controllers, "_wait_for_image", side_effect=ImageUnavailable()):
         controllers._deliver(delivery, REPOSITORY, "1.2.0", "tesk-api")
     assert delivery.detail == "Image not available, or its registry not reachable."
+
+
+@patch(SLEEP)
+@patch(CHECK, return_value=RATE_LIMITED)
+def test_fractional_interval_keeps_all_checks(
+    mock_check: MagicMock,
+    mock_sleep: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that rounding of fractional intervals doesn't drop a check."""
+    monkeypatch.setenv("IMAGE_WAIT_RETRIES", "3")
+    monkeypatch.setenv("IMAGE_WAIT_INTERVAL", "0.7")
+    with pytest.raises(ImageUnavailable):
+        wait()
+    assert mock_check.call_count == 4
+    assert mock_sleep.call_count == 3

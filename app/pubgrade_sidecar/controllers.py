@@ -956,17 +956,9 @@ def _deliver(
                 delivery.generation = patched.metadata.generation
                 delivery.uid = patched.metadata.uid
     except ImageUnavailable as exc:
-        if exc.reason:
-            logger.warning(
-                "Image %s:%s isn't available: %s", image_repo, image_tag, exc.reason
-            )
-            _fail(
-                delivery,
-                f"Image not available, or its registry not reachable: {exc.reason}.",
-            )
-        else:
-            logger.warning("Image %s:%s isn't available.", image_repo, image_tag)
-            _fail(delivery, "Image not available, or its registry not reachable.")
+        suffix = f": {exc.reason}" if exc.reason else ""
+        logger.warning("Image %s:%s isn't available%s.", image_repo, image_tag, suffix)
+        _fail(delivery, f"Image not available, or its registry not reachable{suffix}.")
     except DowngradeRefused:
         # The deployment got a higher version during the wait
         logger.warning("Delivery refused, as it would be a downgrade.")
@@ -1058,6 +1050,8 @@ def _wait_for_image(
     """
     retries, interval = _image_wait()
     remaining = retries * interval
+    # Tolerance of the float sums, so that fractional intervals keep all checks
+    slack = 1e-6
     reason: str | None = None
     for attempt in range(retries + 1):
         if not _is_current(delivery, deployment_name, image_repo):
@@ -1078,7 +1072,7 @@ def _wait_for_image(
             break
         retry_after = result.retry_after
         if retry_after is not None and retry_after > interval:
-            if retry_after > remaining:
+            if retry_after > remaining + slack:
                 reason += (
                     f"; the registry asks to wait {math.ceil(retry_after)} s, "
                     f"longer than the remaining wait of {math.ceil(remaining)} s"
@@ -1087,7 +1081,7 @@ def _wait_for_image(
             delay = retry_after
         else:
             delay = interval
-            if delay > remaining:
+            if delay > remaining + slack:
                 reason += (
                     f"; the next check, {delay:g} s later, wouldn't fit in the "
                     f"remaining wait of {math.ceil(remaining)} s"
@@ -1285,6 +1279,22 @@ def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
     )
 
 
+def _raw_header(response: requests.Response, name: str) -> str | None:
+    """Read a header of a registry's answer, whatever its value.
+
+    Args:
+        response: The registry's answer.
+        name: Name of the header, in lower case.
+
+    Returns:
+        The value, stripped, or None if the header is missing.
+    """
+    for key, value in response.headers.items():
+        if key.lower() == name:
+            return str(value).strip()
+    return None
+
+
 def _header(response: requests.Response, name: str) -> str | None:
     """Read a header of a registry's answer for the reason of a failed check.
 
@@ -1296,11 +1306,8 @@ def _header(response: requests.Response, name: str) -> str | None:
         The value, or None if the header is missing or its value isn't one
         that may be quoted (see `HEADER_VALUE`).
     """
-    for key, value in response.headers.items():
-        if key.lower() == name:
-            stripped = value.strip()
-            return stripped if HEADER_VALUE.fullmatch(stripped) else None
-    return None
+    value = _raw_header(response, name)
+    return value if value and HEADER_VALUE.fullmatch(value) else None
 
 
 def _retry_after(value: str | None) -> float | None:
@@ -1354,7 +1361,11 @@ def _answer_reason(response: requests.Response) -> ImageCheck:
     return ImageCheck(
         available=False,
         reason=reason,
-        retry_after=_retry_after(retry_after) if status in RETRY_STATUSES else None,
+        retry_after=(
+            _retry_after(_raw_header(response, "retry-after"))
+            if status in RETRY_STATUSES
+            else None
+        ),
     )
 
 

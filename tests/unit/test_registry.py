@@ -666,6 +666,19 @@ def test_header_values_sanitized(mock_head: MagicMock) -> None:
     assert result.retry_after is None
 
 
+@patch(HEAD)
+def test_long_retry_after_date_honoured(mock_head: MagicMock) -> None:
+    """Test that a valid `Retry-After` counts even if it isn't quoted."""
+    date = formatdate(time.time() + 60, usegmt=True)
+    mock_head.return_value = response(429, {"Retry-After": date})
+    result = controllers.check_image("org/app", "1")
+    assert result.retry_after is not None
+    with patch.object(controllers, "HEADER_VALUE", controllers.re.compile("x")):
+        unquoted = controllers.check_image("org/app", "1")
+    assert unquoted.reason == "registry answered 429 (rate limit reached)"
+    assert unquoted.retry_after is not None
+
+
 @pytest.mark.parametrize(
     "error,reason",
     [

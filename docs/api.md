@@ -82,7 +82,8 @@ A notification of a new image returns at once, with status 202; the rollout runs
 in the background. If the deployments already use the image, it returns 200 and
 nothing happens. Only the tag can change, and `docker.io/<repository>` and
 `<repository>` count as the same repository. The sidecar waits for the image in
-its registry, about two minutes (longer if the registry answers slowly): Docker
+its registry, by default about 90 seconds (longer if the registry answers
+slowly; see [Waiting for images](deployment.md#waiting-for-images)): Docker
 Hub for repositories without a registry host, otherwise the registry named in
 the repository, e.g., `harbor.example.org/project/tesk-api`. Any registry that
 implements the OCI distribution API should work, e.g., Harbor, GitLab, Quay or
