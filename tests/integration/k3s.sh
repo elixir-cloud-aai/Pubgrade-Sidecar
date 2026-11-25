@@ -412,12 +412,13 @@ out="$(await_report site-a '.status == "failed"')"
 expect "status failed" '"status":"failed"' "${out}"
 # The sidecar's explanation of a missing image, with the reason of the last
 # check: 404, or 429 (of the registry or its token service) if the runner's
-# IP hit Docker Hub's rate limit, with its explanation
+# IP hit Docker Hub's rate limit, with its explanation and any rate-limit
+# headers
 expect "failure explained" \
   '|true|' \
   "|$(jq --raw-output '.detail | test(
     "^Image not available, or its registry not reachable: registry answered "
-    + "(404 [(]image or tag not found[)]|429 [(]rate limit reached[;)].*)[.]$"
+    + "(404 [(]image or tag not found|429 [(]rate limit reached)[;)].*[.]$"
     ) or test("^Image not available, or its registry not reachable: "
     + "token service answered 429 [(]rate limit reached[;)].*[.]$")' \
     <<< "${out}")|"
