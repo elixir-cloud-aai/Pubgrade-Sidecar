@@ -410,6 +410,19 @@ resources:
 
 Values you set are merged with the defaults; set a key to `null` to remove it.
 
+## Upgrading to chart version 0.3.1
+
+Chart 0.3.1 adds the value `imageWait` (`retries: 3` and `interval: 30`, the
+wait that was fixed before, see [Waiting for images](#waiting-for-images)),
+which the chart requires. `helm upgrade --reuse-values` from chart 0.3.0 or
+earlier therefore fails before it changes anything, as it takes the old
+release's values, which lack it: pass your values again (`-f`), or use
+`--reset-then-reuse-values` (Helm 3.14 or later). The API stays at version
+4.1.0; a failed delivery now says why in `detail`, and each failed check is
+logged with its reason. If the sidecar checks Docker Hub from a cluster whose
+pods share one egress IP (e.g., CSC Rahti), set `registryCredentials` (see
+[Registries](#registries)), as anonymous checks can get 429 there.
+
 ## Changed image tags (November 2026)
 
 Until the release workflow was added (November 2026), every push to `dev`
