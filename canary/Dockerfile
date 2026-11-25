@@ -20,7 +20,9 @@ LABEL org.opencontainers.image.documentation="https://github.com/elixir-cloud-aa
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.vendor="ELIXIR On-Cloud"
 
-RUN echo "${VERSION}" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' \
+## (each a single line: `grep -x` checks lines, not the whole value)
+RUN [ "$(printf '%s' "${VERSION}${COMMIT}" | tr -d -c '\n' | wc -c)" -eq 0 ] \
+    && echo "${VERSION}" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' \
     && echo "${COMMIT}" | grep -Eqx '[0-9a-f]{7,40}|unknown' \
     && mkdir -p /www \
     && printf '{"version": "%s", "commit": "%s"}\n' "${VERSION}" "${COMMIT}" \

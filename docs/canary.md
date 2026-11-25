@@ -5,30 +5,35 @@ deployments. Once a week (and by hand), the workflow `Canary`
 ([`.github/workflows/canary.yml`](https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/blob/dev/.github/workflows/canary.yml))
 releases a new version of a tiny image and checks that every site rolled it out
 automatically, through Pubgrade and a sidecar, the same path that real
-releases take. A failed run means that an upgrade didn't reach a site, and
-GitHub mails the people who watch the workflow.
+releases take. A failed run means that an upgrade didn't reach a site. GitHub
+notifies the person who last changed the schedule (or enabled the workflow)
+of failed scheduled runs; others see them if they subscribed to Actions
+notifications for the repository, or by the badge in the README.
 
 ## What it proves
 
 Each run goes through the whole chain:
 
-1. **Push canary:** builds `elixircloud/pubgrade-canary:1.0.<run number>`
+1. **Push canary:** builds `elixircloud/pubgrade-canary:1.0.N`, where N is
+   the run number times 100 plus the attempt, so that it grows with every
+   run, re-runs included,
    from [`canary/Dockerfile`](https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/blob/dev/canary/Dockerfile)
    and pushes it to Docker Hub. The image is about 2 MB: BusyBox's `httpd`,
    run as any non-root user on port 8080, which serves `/version.json`, e.g.,
    `{"version": "1.0.42", "commit": "<sha>"}`.
-2. **Notify canary:** registers the image as a build of the repository
+2. **Canary rollout:** registers the image as a build of the repository
    `pubgrade-canary` at Pubgrade, with Pubgrade's
-   [notify action](https://github.com/elixir-cloud-aai/Pubgrade/tree/v0.3.0/actions/notify).
-   Pubgrade notifies every subscription of that repository, one per site.
-3. **Canary rollout:** checks that Pubgrade delivered every notification,
-   then polls `/version.json` of each site until it serves the new version
-   (10 minutes at most). The job summary lists, per site, the gap from the
-   notification to the new version, and per subscription Pubgrade's result.
+   [notify action](https://github.com/elixir-cloud-aai/Pubgrade/tree/v0.3.0/actions/notify),
+   and Pubgrade notifies every subscription of that repository, one per site.
+   Right after that, the same job polls `/version.json` of each site until it
+   serves the new version (10 minutes at most), and then checks that
+   Pubgrade delivered every notification. The job summary lists, per site,
+   the gap from the notification to the new version (accurate to the polling
+   interval of 10 s), and per subscription Pubgrade's result.
 
 At each site, the canary sidecar checks the tag in the registry, patches the
-canary Deployment, and Kubernetes rolls it out. Run numbers only grow, so
-every run is an upgrade.
+canary Deployment, and Kubernetes rolls it out. The versions only grow, so
+every run is an upgrade to a tag that didn't exist before.
 
 The checks are in
 [`scripts/canary.py`](https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/blob/dev/scripts/canary.py),

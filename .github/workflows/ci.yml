@@ -227,7 +227,7 @@ jobs:
 
   # Builds the canary image (`canary/`, pushed by `canary.yml`) and checks
   # that it serves its version as an arbitrary non-root user, as on
-  # OpenShift, and that its build refuses a version that isn't X.Y.Z
+  # OpenShift, and that its build refuses other versions and commits
   canary:
     name: Canary image
     runs-on: ubuntu-latest
@@ -241,12 +241,25 @@ jobs:
         run: |
           docker build --tag canary:ci --build-arg VERSION=1.0.42 \
             --build-arg COMMIT="${GITHUB_SHA}" canary
-      - name: Check that the build refuses other versions
+      # The base image is cached by now, so a failed build is the check's
+      # (its RUN step), not the network's
+      - name: Check that the build refuses other values
         run: |
-          if docker build --build-arg 'VERSION=1.0.42", "x": "y' canary; then
-            echo "::error::The build accepted an invalid version"
-            exit 1
-          fi
+          check() {
+            if docker build --build-arg "$1" canary > build.log 2>&1; then
+              echo "::error::The build accepted $1"
+              exit 1
+            fi
+            if ! grep -q 'did not complete successfully' build.log; then
+              cat build.log
+              echo "::error::The build failed for another reason: $1"
+              exit 1
+            fi
+          }
+          check 'VERSION=1.0.42", "x": "y'
+          check "VERSION=$(printf '1.0.42\n1.0.43')"
+          check 'COMMIT=abc1234", "x": "y'
+          check "COMMIT=$(printf 'abc1234\nabc1235')"
       - name: Start canary as an arbitrary user
         run: |
           docker run --detach --name canary --user 123456:0 \

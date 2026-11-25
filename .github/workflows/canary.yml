@@ -1,8 +1,8 @@
 # Scheduled smoke test of automatic upgrades on the live deployments: pushes a
-# new canary image (`canary/Dockerfile`, tagged `1.0.<run number>`), notifies
-# Pubgrade, and waits until every canary site serves the new version
-# (`scripts/canary.py`), with the gap per site in the job summary. A failure
-# means that an upgrade didn't reach a site: see "Canary" in `docs/canary.md`.
+# new canary image (`canary/Dockerfile`, tagged `1.0.<run number × 100 +
+# attempt>`), notifies Pubgrade, and waits until every canary site serves the
+# new version (`scripts/canary.py`), with the gap per site in the job summary.
+# A failure means that an upgrade didn't reach a site: see `docs/canary.md`.
 #
 # Runs weekly and by hand, in the environment `canary` (deployment branch
 # `dev` only, no reviewers, so that the schedule runs): secret
@@ -46,15 +46,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Run numbers only grow, so every run is an upgrade (the canary
-      # sidecars refuse downgrades and allow only `1\.0\.[0-9]+`)
+      # Run number times 100 plus the attempt (at most 50 per run): it only
+      # grows, also over re-runs, so every run is an upgrade to a new tag
+      # (the canary sidecars refuse downgrades and allow only
+      # `1\.0\.[0-9]+`)
       - name: Set version
         id: version
         env:
           RUN_NUMBER: ${{ github.run_number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
-          echo "version=1.0.${RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-          echo "image=${IMAGE_NAME}:1.0.${RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          version="1.0.$((RUN_NUMBER * 100 + RUN_ATTEMPT))"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE_NAME}:${version}" >> "$GITHUB_OUTPUT"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Log in to Docker Hub
@@ -72,16 +76,15 @@ jobs:
             VERSION=${{ steps.version.outputs.version }}
             COMMIT=${{ github.sha }}
 
-  notify:
-    name: Notify canary
+  # Notifies Pubgrade and waits for the sites in one job, so that the gaps
+  # are measured from the notification on one clock, without the start-up
+  # of another job
+  rollout:
+    name: Canary rollout
     needs: push
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     environment: canary
-    outputs:
-      configured: ${{ steps.config.outputs.configured }}
-      since: ${{ steps.config.outputs.since }}
-      build-id: ${{ steps.notify.outputs.build-id }}
     steps:
       - name: Check configuration
         id: config
@@ -98,7 +101,15 @@ jobs:
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Canary not configured (environment canary): image pushed, nothing notified"
           fi
-          echo "since=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Check out repository
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Note the time
+        id: since
+        if: steps.config.outputs.configured == 'true'
+        run: echo "since=$(date +%s)" >> "$GITHUB_OUTPUT"
       - name: Notify Pubgrade
         id: notify
         if: steps.config.outputs.configured == 'true'
@@ -109,34 +120,24 @@ jobs:
           token: ${{ secrets.PUBGRADE_CANARY_TOKEN }}
           image: ${{ needs.push.outputs.image }}
           git-branch: ${{ github.ref_name }}
-
-  smoke:
-    name: Canary rollout
-    needs: [push, notify]
-    if: needs.notify.outputs.configured == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: canary
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Check notifications at Pubgrade
-        env:
-          PUBGRADE_URL: ${{ vars.PUBGRADE_URL }}
-          REPOSITORY_ID: ${{ vars.PUBGRADE_CANARY_REPOSITORY_ID }}
-          BUILD_ID: ${{ needs.notify.outputs.build-id }}
-        run: |
-          python3 scripts/canary.py deliveries --url "${PUBGRADE_URL}" \
-            --repository "${REPOSITORY_ID}" --build "${BUILD_ID}"
-      # Also after failed notifications, to show which sites still rolled out
       - name: Wait for the sites
-        if: success() || failure()
+        if: steps.config.outputs.configured == 'true'
         env:
           SITES: ${{ vars.CANARY_SITES }}
           VERSION: ${{ needs.push.outputs.version }}
-          SINCE: ${{ needs.notify.outputs.since }}
+          SINCE: ${{ steps.since.outputs.since }}
         run: |
           python3 scripts/canary.py rollout --sites "${SITES}" \
             --version "${VERSION}" --since "${SINCE}" --timeout 600
+      # Also after a failed rollout, to show which notifications failed
+      - name: Check notifications at Pubgrade
+        if: >-
+          (success() || failure())
+          && steps.notify.outcome == 'success'
+        env:
+          PUBGRADE_URL: ${{ vars.PUBGRADE_URL }}
+          REPOSITORY_ID: ${{ vars.PUBGRADE_CANARY_REPOSITORY_ID }}
+          BUILD_ID: ${{ steps.notify.outputs.build-id }}
+        run: |
+          python3 scripts/canary.py deliveries --url "${PUBGRADE_URL}" \
+            --repository "${REPOSITORY_ID}" --build "${BUILD_ID}"

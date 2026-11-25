@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Sequence
+from http.client import HTTPException
 import json
 import os
 import re
@@ -47,6 +48,18 @@ IDENTIFIER = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 class CanaryError(Exception):
     """Raised when an input or an answer makes the check impossible."""
+
+
+def schemes(allow_http: bool) -> tuple[str, ...]:
+    """Name the URL schemes that may be used.
+
+    Args:
+        allow_http: Whether plain HTTP is allowed (local tests only).
+
+    Returns:
+        `https`, and `http` if allowed.
+    """
+    return ("https", "http") if allow_http else ("https",)
 
 
 def parse_sites(text: str, allow_http: bool = False) -> list[str]:
@@ -77,8 +90,7 @@ def parse_sites(text: str, allow_http: bool = False) -> list[str]:
         if not isinstance(site, str):
             raise CanaryError("Each site must be a URL (a string).")
         parts = urlsplit(site)
-        schemes = ("https", "http") if allow_http else ("https",)
-        if parts.scheme not in schemes or not parts.hostname:
+        if parts.scheme not in schemes(allow_http) or not parts.hostname:
             raise CanaryError(f"Sites must be HTTPS URLs: {site!r}")
         if parts.username or parts.password:
             raise CanaryError("Site URLs must not contain credentials.")
@@ -120,7 +132,8 @@ def fetch_json(url: str) -> tuple[int, Any]:
         or is larger than `MAX_RESPONSE`.
 
     Raises:
-        URLError: If the server can't be reached.
+        URLError: If the server can't be reached or its answer isn't valid
+            HTTP.
     """
     request = Request(url, headers={"Accept": "application/json"})  # noqa: S310
     try:
@@ -129,11 +142,13 @@ def fetch_json(url: str) -> tuple[int, Any]:
             content = response.read(MAX_RESPONSE + 1)
     except HTTPError as exc:
         return exc.code, None
+    except HTTPException as exc:
+        raise URLError(type(exc).__name__) from exc
     if len(content) > MAX_RESPONSE:
         return status, None
     try:
         return status, json.loads(content)
-    except ValueError:
+    except (ValueError, RecursionError):
         return status, None
 
 
@@ -165,8 +180,8 @@ def wait_for_version(
     since: float,
     timeout: float,
     interval: float,
-    clock: Callable[[], float] = time.time,
-    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] | None = None,
+    sleep: Callable[[float], None] | None = None,
 ) -> dict[str, float | None]:
     """Wait until every site serves a version, or the time is up.
 
@@ -177,13 +192,15 @@ def wait_for_version(
             are measured.
         timeout: Seconds to wait in all, from now.
         interval: Seconds between rounds of requests.
-        clock: Source of the time.
-        sleep: Function that waits.
+        clock: Source of the time (default: `time.time`).
+        sleep: Function that waits (default: `time.sleep`).
 
     Returns:
         Per site, the seconds from `since` to the first answer with the
         version, or None if it never came.
     """
+    clock = clock or time.time
+    sleep = sleep or time.sleep
     deadline = clock() + timeout
     gaps: dict[str, float | None] = dict.fromkeys(sites)
     while True:
@@ -202,8 +219,8 @@ def wait_for_deliveries(
     build: str,
     timeout: float,
     interval: float,
-    clock: Callable[[], float] = time.time,
-    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] | None = None,
+    sleep: Callable[[float], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Wait until Pubgrade has notified every subscription of a build.
 
@@ -213,35 +230,50 @@ def wait_for_deliveries(
         build: Identifier of the build.
         timeout: Seconds to wait in all.
         interval: Seconds between requests.
-        clock: Source of the time.
-        sleep: Function that waits.
+        clock: Source of the time (default: `time.time`).
+        sleep: Function that waits (default: `time.sleep`).
 
     Returns:
         The results of the notifications (`notifications` of the build).
 
     Raises:
-        CanaryError: If Pubgrade answers other than 200, or the notifications
-            don't finish in time.
-        URLError: If Pubgrade can't be reached.
+        CanaryError: At once if Pubgrade answers with a client error (4xx);
+            otherwise if it can't be reached, answers with a server error or
+            the notifications don't finish before the time is up (each of
+            these is retried until then).
     """
     target = (
         f"{url.rstrip('/')}/repositories/{check_identifier(repository, 'repository')}"
         f"/builds/{check_identifier(build, 'build')}"
     )
+    clock = clock or time.time
+    sleep = sleep or time.sleep
     deadline = clock() + timeout
     while True:
-        status, body = fetch_json(target)
-        if status != 200:
-            raise CanaryError(f"Pubgrade answered {status} for the build.")
-        if (
-            isinstance(body, dict)
-            and body.get("finished_at")
-            and isinstance(body.get("notifications"), list)
-        ):
-            return [item for item in body["notifications"] if isinstance(item, dict)]
+        try:
+            status, body = fetch_json(target)
+        except (URLError, OSError) as exc:
+            problem = f"Pubgrade not reachable ({type(exc).__name__})."
+        else:
+            if 400 <= status < 500:
+                raise CanaryError(f"Pubgrade answered {status} for the build.")
+            if (
+                status == 200
+                and isinstance(body, dict)
+                and body.get("finished_at")
+                and isinstance(body.get("notifications"), list)
+            ):
+                return [
+                    item for item in body["notifications"] if isinstance(item, dict)
+                ]
+            problem = (
+                f"The notifications didn't finish in {timeout:g} s."
+                if status == 200
+                else f"Pubgrade answered {status} for the build."
+            )
         remaining = deadline - clock()
         if remaining <= 0:
-            raise CanaryError(f"The notifications didn't finish in {timeout:g} s.")
+            raise CanaryError(problem)
         sleep(min(interval, remaining))
 
 
@@ -316,8 +348,7 @@ def _deliveries(args: argparse.Namespace) -> int:
     Raises:
         CanaryError: If an input is invalid or Pubgrade's answer unusable.
     """
-    parts = urlsplit(args.url)
-    if parts.scheme not in (("https", "http") if args.allow_http else ("https",)):
+    if urlsplit(args.url).scheme not in schemes(args.allow_http):
         raise CanaryError("Pubgrade's URL must be HTTPS.")
     notifications = wait_for_deliveries(
         args.url, args.repository, args.build, args.timeout, args.interval
@@ -356,21 +387,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         Exit status.
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--allow-http", action="store_true", help="allow plain HTTP (local tests)"
+    )
     commands = parser.add_subparsers(dest="command", required=True)
-    rollout = commands.add_parser("rollout", help="wait for the sites")
+    rollout = commands.add_parser(
+        "rollout", parents=[common], help="wait for the sites"
+    )
     rollout.add_argument("--sites", required=True)
     rollout.add_argument("--version", required=True)
     rollout.add_argument("--since", required=True, type=float)
     rollout.add_argument("--timeout", type=float, default=600)
     rollout.add_argument("--interval", type=float, default=10)
-    rollout.add_argument("--allow-http", action="store_true")
-    deliveries = commands.add_parser("deliveries", help="check Pubgrade's results")
+    deliveries = commands.add_parser(
+        "deliveries", parents=[common], help="check Pubgrade's results"
+    )
     deliveries.add_argument("--url", required=True)
     deliveries.add_argument("--repository", required=True)
     deliveries.add_argument("--build", required=True)
     deliveries.add_argument("--timeout", type=float, default=120)
     deliveries.add_argument("--interval", type=float, default=5)
-    deliveries.add_argument("--allow-http", action="store_true")
     args = parser.parse_args(argv)
     run = _rollout if args.command == "rollout" else _deliveries
     try:

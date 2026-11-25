@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import json
 from pathlib import Path
+import socket
 import sys
 import threading
 from typing import Any, ClassVar
@@ -218,6 +219,91 @@ def test_bad_answers_are_retried(
     assert "not yet" in capsys.readouterr().out
 
 
+def test_deeply_nested_answer_is_retried(
+    stub: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that JSON too deep to parse counts as a bad answer."""
+    Stub.routes = {"/a/version.json": [(200, b"[" * 60000), version("1.0.2")]}
+    clock = Clock()
+    gaps = canary.wait_for_version(
+        [f"{stub}/a"],
+        "1.0.2",
+        since=1000.0,
+        timeout=60,
+        interval=10,
+        clock=clock.time,
+        sleep=clock.sleep,
+    )
+    assert gaps == {f"{stub}/a": 10.0}
+    assert "not yet" in capsys.readouterr().out
+
+
+@pytest.fixture
+def broken() -> Iterator[str]:
+    """Start a server that answers with an invalid HTTP status line.
+
+    Yields:
+        Its base URL.
+    """
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen()
+    server.settimeout(0.2)
+    stop = threading.Event()
+
+    def serve() -> None:
+        """Answer every connection with garbage until stopped."""
+        while not stop.is_set():
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                continue
+            with conn:
+                conn.recv(4096)
+                conn.sendall(b"garbage\r\n\r\n")
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.getsockname()[1]}"
+    stop.set()
+    thread.join()
+    server.close()
+
+
+def test_invalid_http_answer_is_retried(
+    broken: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that an invalid HTTP answer counts as an unreachable site."""
+    clock = Clock()
+    gaps = canary.wait_for_version(
+        [broken],
+        "1.0.2",
+        since=1000.0,
+        timeout=10,
+        interval=10,
+        clock=clock.time,
+        sleep=clock.sleep,
+    )
+    assert gaps == {broken: None}
+    assert "URLError" in capsys.readouterr().out
+
+
+def test_invalid_http_answer_of_pubgrade(broken: str) -> None:
+    """Test that invalid HTTP answers of Pubgrade are retried, then an error."""
+    clock = Clock()
+    with pytest.raises(canary.CanaryError, match="not reachable"):
+        canary.wait_for_deliveries(
+            broken,
+            "r1",
+            "b1",
+            timeout=10,
+            interval=5,
+            clock=clock.time,
+            sleep=clock.sleep,
+        )
+    assert clock.sleeps == [5, 5]
+
+
 def test_unreachable_site(capsys: pytest.CaptureFixture[str]) -> None:
     """Test that a site that can't be reached is retried, then has no gap."""
     clock = Clock()
@@ -307,6 +393,58 @@ def test_deliveries_of_missing_build(stub: str) -> None:
             clock=clock.time,
             sleep=clock.sleep,
         )
+
+
+def test_deliveries_retry_server_errors(stub: str) -> None:
+    """Test that server errors of Pubgrade are retried."""
+    Stub.routes = {
+        "/repositories/r1/builds/b1": [
+            (503, {"message": "busy"}),
+            (200, build(["delivered"])),
+        ]
+    }
+    clock = Clock()
+    notifications = canary.wait_for_deliveries(
+        stub, "r1", "b1", timeout=60, interval=5, clock=clock.time, sleep=clock.sleep
+    )
+    assert [item["result"] for item in notifications] == ["delivered"]
+    assert clock.sleeps == [5]
+
+
+def test_deliveries_server_errors_time_out(stub: str) -> None:
+    """Test that server errors until the deadline are an error."""
+    Stub.routes = {"/repositories/r1/builds/b1": [(502, {"message": "down"})]}
+    clock = Clock()
+    with pytest.raises(canary.CanaryError, match="502"):
+        canary.wait_for_deliveries(
+            stub,
+            "r1",
+            "b1",
+            timeout=10,
+            interval=5,
+            clock=clock.time,
+            sleep=clock.sleep,
+        )
+    assert clock.sleeps == [5, 5]
+
+
+def test_deliveries_unreachable_retried() -> None:
+    """Test that an unreachable Pubgrade is retried until the deadline."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    clock = Clock()
+    with pytest.raises(canary.CanaryError, match="not reachable"):
+        canary.wait_for_deliveries(
+            f"http://127.0.0.1:{port}",
+            "r1",
+            "b1",
+            timeout=10,
+            interval=5,
+            clock=clock.time,
+            sleep=clock.sleep,
+        )
+    assert clock.sleeps == [5, 5]
 
 
 def run_main(
