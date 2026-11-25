@@ -16,6 +16,7 @@
 [![GitHub_tag][badge-github-tag]][badge-url-github-tag]
 [![Docker_image][badge-docker]][badge-url-docker]
 [![DOI][badge-doi]][badge-url-doi]
+[![Canary][badge-canary]][badge-url-canary]
 
 Pubgrade-Sidecar rolls out new releases of a service to its Kubernetes
 Deployments when [Pubgrade](https://github.com/elixir-cloud-aai/Pubgrade)
@@ -51,6 +52,7 @@ mind our [code of conduct][code-of-conduct].
 [Apache License 2.0](LICENSE)
 
 [badge-build-status]: <https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/actions/workflows/ci.yml/badge.svg?branch=dev>
+[badge-canary]: <https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/actions/workflows/canary.yml/badge.svg?branch=dev>
 [badge-coverage]: <https://codecov.io/gh/elixir-cloud-aai/Pubgrade-Sidecar/branch/dev/graph/badge.svg?branch=dev>
 [badge-docker]: <https://img.shields.io/docker/v/elixircloud/pubgrade-sidecar?sort=semver&label=image&color=C39BD3>
 [badge-doi]: <https://zenodo.org/badge/DOI/10.5281/zenodo.24087986.svg>
@@ -58,6 +60,7 @@ mind our [code of conduct][code-of-conduct].
 [badge-github-tag]: <https://img.shields.io/github/v/tag/elixir-cloud-aai/Pubgrade-Sidecar?color=C39BD3>
 [badge-license]: <https://img.shields.io/badge/license-Apache%202.0-blue.svg>
 [badge-url-build-status]: <https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/actions/workflows/ci.yml?query=branch%3Adev>
+[badge-url-canary]: <https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/actions/workflows/canary.yml>
 [badge-url-coverage]: <https://codecov.io/gh/elixir-cloud-aai/Pubgrade-Sidecar?branch=dev>
 [badge-url-docker]: <https://hub.docker.com/r/elixircloud/pubgrade-sidecar/tags>
 [badge-url-doi]: <https://doi.org/10.5281/zenodo.24087986>

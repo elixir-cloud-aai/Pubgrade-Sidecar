@@ -1,0 +1,6 @@
+# The canary's build needs no files from its context (the Dockerfile writes
+# everything it serves); nothing else is sent
+*
+# Never send secrets, also if the rule above changes
+**/.env*
+!**/.env.example
