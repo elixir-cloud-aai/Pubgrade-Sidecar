@@ -265,8 +265,8 @@ If the registry or its token service answers 429 or 503 with `Retry-After`,
 the next check waits that long instead, if it is longer than the interval.
 The pauses never add up to more than `retries` x `interval` seconds, and a
 pause that wouldn't fit ends the delivery at once. A delivery that a newer
-notification replaces stops within 5 seconds, also during a long pause, and
-frees its worker. Each waiting delivery holds one of the sidecar's 16
+notification replaces during a pause stops within 5 seconds, also during a
+long pause, and frees its worker; a check that is running finishes first. Each waiting delivery holds one of the sidecar's 16
 workers, so keep the wait short.
 
 The checks themselves add their time. Each request has a timeout of 10

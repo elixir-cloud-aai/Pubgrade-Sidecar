@@ -61,7 +61,8 @@ registryCredentials:
 # 30 s each against a registry that doesn't answer). After a 429 or 503 with
 # `Retry-After` (of the registry or its token service), the next check waits
 # that long instead, if it is longer and fits in the rest of the wait;
-# otherwise the delivery fails at once. A replaced delivery stops within 5 s.
+# otherwise the delivery fails at once. A delivery replaced during a pause
+# stops within 5 s.
 # Each waiting delivery holds one of 16 workers. On Docker Hub, anonymous
 # checks share the rate limit of the cluster's egress IP: set
 # `registryCredentials` rather than waiting longer (see docs/deployment.md,
