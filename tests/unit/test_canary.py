@@ -411,6 +411,28 @@ def test_deliveries_retry_server_errors(stub: str) -> None:
     assert clock.sleeps == [5]
 
 
+@pytest.mark.parametrize("status", [408, 429])
+def test_deliveries_retry_transient_client_errors(stub: str, status: int) -> None:
+    """Test that a timeout or rate limit of Pubgrade is retried."""
+    Stub.routes = {
+        "/repositories/r1/builds/b1": [
+            (status, {"message": "later"}),
+            (200, build(["delivered"])),
+        ]
+    }
+    clock = Clock()
+    notifications = canary.wait_for_deliveries(
+        stub, "r1", "b1", timeout=60, interval=5, clock=clock.time, sleep=clock.sleep
+    )
+    assert [item["result"] for item in notifications] == ["delivered"]
+
+
+def test_invalid_host_name_is_unreachable() -> None:
+    """Test that a host name that can't be encoded counts as unreachable."""
+    with pytest.raises(canary.URLError):
+        canary.fetch_json("https://a..b/version.json")
+
+
 def test_deliveries_server_errors_time_out(stub: str) -> None:
     """Test that server errors until the deadline are an error."""
     Stub.routes = {"/repositories/r1/builds/b1": [(502, {"message": "down"})]}
@@ -462,6 +484,9 @@ def run_main(
     """
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    # The script looks up time.sleep at call time, so this skips its waits;
+    # the clock stays real, so tests through main must succeed at the first
+    # round or use --timeout 0
     monkeypatch.setattr(canary.time, "sleep", lambda _: None)
     status = canary.main(argv)
     return status, summary.read_text() if summary.exists() else ""
@@ -597,6 +622,22 @@ def test_invalid_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
             "--since",
             "0",
         ],
+        tmp_path,
+        monkeypatch,
+    )
+    assert status == 1
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://", "https://user:pw@pubgrade.example.org", "https://p.example.org?x=1"],
+)
+def test_invalid_pubgrade_url_refused(
+    url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that an unusable URL of Pubgrade is an input error at once."""
+    status, _ = run_main(
+        ["deliveries", "--url", url, "--repository", "r1", "--build", "b1"],
         tmp_path,
         monkeypatch,
     )

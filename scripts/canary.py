@@ -40,9 +40,12 @@ from urllib.request import Request, urlopen
 # Largest answer that is read, in bytes
 MAX_RESPONSE = 64 * 1024
 REQUEST_TIMEOUT = 10
-# Versions of the canary, as the workflow tags them (`1.0.<run number>`)
+# Versions of the canary, as the workflow tags them
+# (`1.0.<run number * 100 + attempt>`)
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 # Identifiers of Pubgrade (repositories, builds), which go into URL paths
+# Client errors that are worth another try (timeout, rate limit)
+RETRIED = frozenset({408, 429})
 IDENTIFIER = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
@@ -132,8 +135,8 @@ def fetch_json(url: str) -> tuple[int, Any]:
         or is larger than `MAX_RESPONSE`.
 
     Raises:
-        URLError: If the server can't be reached or its answer isn't valid
-            HTTP.
+        URLError: If the server can't be reached (also if its host name is
+            invalid) or its answer isn't valid HTTP.
     """
     request = Request(url, headers={"Accept": "application/json"})  # noqa: S310
     try:
@@ -142,7 +145,7 @@ def fetch_json(url: str) -> tuple[int, Any]:
             content = response.read(MAX_RESPONSE + 1)
     except HTTPError as exc:
         return exc.code, None
-    except HTTPException as exc:
+    except (HTTPException, UnicodeError) as exc:
         raise URLError(type(exc).__name__) from exc
     if len(content) > MAX_RESPONSE:
         return status, None
@@ -237,7 +240,8 @@ def wait_for_deliveries(
         The results of the notifications (`notifications` of the build).
 
     Raises:
-        CanaryError: At once if Pubgrade answers with a client error (4xx);
+        CanaryError: At once if Pubgrade answers with a client error (4xx,
+            except 408 and 429);
             otherwise if it can't be reached, answers with a server error or
             the notifications don't finish before the time is up (each of
             these is retried until then).
@@ -255,7 +259,7 @@ def wait_for_deliveries(
         except (URLError, OSError) as exc:
             problem = f"Pubgrade not reachable ({type(exc).__name__})."
         else:
-            if 400 <= status < 500:
+            if 400 <= status < 500 and status not in RETRIED:
                 raise CanaryError(f"Pubgrade answered {status} for the build.")
             if (
                 status == 200
@@ -348,8 +352,13 @@ def _deliveries(args: argparse.Namespace) -> int:
     Raises:
         CanaryError: If an input is invalid or Pubgrade's answer unusable.
     """
-    if urlsplit(args.url).scheme not in schemes(args.allow_http):
-        raise CanaryError("Pubgrade's URL must be HTTPS.")
+    parts = urlsplit(args.url)
+    if parts.scheme not in schemes(args.allow_http) or not parts.hostname:
+        raise CanaryError("Pubgrade's URL must be an HTTPS URL.")
+    if parts.username or parts.password or parts.query or parts.fragment:
+        raise CanaryError(
+            "Pubgrade's URL must not have credentials, a query or a fragment."
+        )
     notifications = wait_for_deliveries(
         args.url, args.repository, args.build, args.timeout, args.interval
     )

@@ -12,20 +12,19 @@ notifications for the repository, or by the badge in the README.
 
 ## What it proves
 
-Each run goes through the whole chain:
+Each run goes through the whole chain, in one job ("Canary rollout"):
 
-1. **Push canary:** builds `elixircloud/pubgrade-canary:1.0.N`, where N is
-   the run number times 100 plus the attempt, so that it grows with every
-   run, re-runs included,
-   from [`canary/Dockerfile`](https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/blob/dev/canary/Dockerfile)
+1. **Push:** builds `elixircloud/pubgrade-canary:1.0.N` (N is the
+   run number times 100 plus the attempt, so it grows with every run, re-runs
+   included) from [`canary/Dockerfile`](https://github.com/elixir-cloud-aai/Pubgrade-Sidecar/blob/dev/canary/Dockerfile)
    and pushes it to Docker Hub. The image is about 2 MB: BusyBox's `httpd`,
    run as any non-root user on port 8080, which serves `/version.json`, e.g.,
    `{"version": "1.0.42", "commit": "<sha>"}`.
-2. **Canary rollout:** registers the image as a build of the repository
+2. **Notify and wait:** registers the image as a build of the repository
    `pubgrade-canary` at Pubgrade, with Pubgrade's
    [notify action](https://github.com/elixir-cloud-aai/Pubgrade/tree/v0.3.0/actions/notify),
    and Pubgrade notifies every subscription of that repository, one per site.
-   Right after that, the same job polls `/version.json` of each site until it
+   Right after that, it polls `/version.json` of each site until it
    serves the new version (10 minutes at most), and then checks that
    Pubgrade delivered every notification. The job summary lists, per site,
    the gap from the notification to the new version (accurate to the polling
@@ -101,3 +100,6 @@ upgrade it, subscribed at Pubgrade:
   site didn't roll out. Ask the sidecar for the delivery
   (`GET /deployment/pubgrade-canary`): its `detail` says why, e.g., that the
   image check failed (see [Registries](deployment.md#registries)).
+- **To try again,** re-run the latest run (any re-run pushes a new version)
+  or start a new one. Don't re-run an older run once a newer one has pushed:
+  its version is lower, and the sidecars refuse it as a downgrade.

@@ -1,5 +1,5 @@
 # Scheduled smoke test of automatic upgrades on the live deployments: pushes a
-# new canary image (`canary/Dockerfile`, tagged `1.0.<run number × 100 +
+# new canary image (`canary/Dockerfile`, tagged `1.0.<run number * 100 +
 # attempt>`), notifies Pubgrade, and waits until every canary site serves the
 # new version (`scripts/canary.py`), with the gap per site in the job summary.
 # A failure means that an upgrade didn't reach a site: see `docs/canary.md`.
@@ -32,24 +32,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  push:
-    name: Push canary
+  # One job, so that every re-run (also of failed jobs only) pushes a new
+  # version, and the gaps are measured from the notification on one clock
+  rollout:
+    name: Canary rollout
     if: ${{ github.repository_owner == 'elixir-cloud-aai' || vars.DOCKERHUB_ORG != '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     environment: canary
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      image: ${{ steps.version.outputs.image }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Run number times 100 plus the attempt (at most 50 per run): it only
-      # grows, also over re-runs, so every run is an upgrade to a new tag
-      # (the canary sidecars refuse downgrades and allow only
-      # `1\.0\.[0-9]+`)
+      # Run number times 100 plus the attempt (GitHub allows far fewer than
+      # 100 attempts per run): it only grows, also over re-runs, so every run
+      # is an upgrade to a new tag (the canary sidecars refuse downgrades and
+      # allow only `1\.0\.[0-9]+`)
       - name: Set version
         id: version
         env:
@@ -75,17 +74,6 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
             COMMIT=${{ github.sha }}
-
-  # Notifies Pubgrade and waits for the sites in one job, so that the gaps
-  # are measured from the notification on one clock, without the start-up
-  # of another job
-  rollout:
-    name: Canary rollout
-    needs: push
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: canary
-    steps:
       - name: Check configuration
         id: config
         env:
@@ -101,11 +89,6 @@ jobs:
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Canary not configured (environment canary): image pushed, nothing notified"
           fi
-      - name: Check out repository
-        if: steps.config.outputs.configured == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - name: Note the time
         id: since
         if: steps.config.outputs.configured == 'true'
@@ -118,13 +101,13 @@ jobs:
           url: ${{ vars.PUBGRADE_URL }}
           repository-id: ${{ vars.PUBGRADE_CANARY_REPOSITORY_ID }}
           token: ${{ secrets.PUBGRADE_CANARY_TOKEN }}
-          image: ${{ needs.push.outputs.image }}
+          image: ${{ steps.version.outputs.image }}
           git-branch: ${{ github.ref_name }}
       - name: Wait for the sites
         if: steps.config.outputs.configured == 'true'
         env:
           SITES: ${{ vars.CANARY_SITES }}
-          VERSION: ${{ needs.push.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
           SINCE: ${{ steps.since.outputs.since }}
         run: |
           python3 scripts/canary.py rollout --sites "${SITES}" \
