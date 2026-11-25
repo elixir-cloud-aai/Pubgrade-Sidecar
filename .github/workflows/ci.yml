@@ -61,7 +61,7 @@ jobs:
     permissions: {}
     steps:
       - name: Check PR title
-        uses: elixir-cloud-aai/.github/actions/pr-title@31f22fccc1f3c597ed7c1d1f75b2f85522155348 # v1.1.0
+        uses: elixir-cloud-aai/.github/actions/pr-title@bf3840c9c072aaf37d6cafe199aaa1994087d1ef # v1.2.0
 
   lint:
     name: Lint
@@ -75,7 +75,7 @@ jobs:
       # uv, at the version locked in `uv.lock` (a dev dependency); the action
       # checks its checksum
       - name: Set up uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version-file: uv.lock
       # The image build installs the locked dependencies (`Dockerfile`), so the
@@ -127,7 +127,7 @@ jobs:
           persist-credentials: false
       # As in `lint`
       - name: Set up uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version-file: uv.lock
       - name: Install dependencies
@@ -162,7 +162,7 @@ jobs:
           persist-credentials: false
       # As in `lint`
       - name: Set up uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version-file: uv.lock
       - name: Install dependencies
@@ -297,7 +297,7 @@ jobs:
       - name: Build image
         run: docker build --tag pubgrade-sidecar:scan .
       - name: Scan image
-        uses: elixir-cloud-aai/.github/actions/scan-image@31f22fccc1f3c597ed7c1d1f75b2f85522155348 # v1.1.0
+        uses: elixir-cloud-aai/.github/actions/scan-image@bf3840c9c072aaf37d6cafe199aaa1994087d1ef # v1.2.0
         with:
           image: pubgrade-sidecar:scan
           category: image
@@ -352,7 +352,7 @@ jobs:
             --set ingress.tlsSecretName=sidecar-tls
       # As in `lint`
       - name: Set up uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version-file: uv.lock
       - name: Install dependencies
@@ -453,7 +453,7 @@ jobs:
     permissions: {}
     steps:
       - name: Check results of all jobs
-        uses: elixir-cloud-aai/.github/actions/gate@31f22fccc1f3c597ed7c1d1f75b2f85522155348 # v1.1.0
+        uses: elixir-cloud-aai/.github/actions/gate@bf3840c9c072aaf37d6cafe199aaa1994087d1ef # v1.2.0
         with:
           needs: ${{ toJSON(needs) }}
           allow-skipped: title publish
