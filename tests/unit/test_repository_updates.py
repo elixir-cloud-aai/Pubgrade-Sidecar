@@ -18,7 +18,10 @@ TOKEN = "test-token"
 READ = "kubernetes.client.AppsV1Api.read_namespaced_deployment"
 LIST = "kubernetes.client.AppsV1Api.list_namespaced_deployment"
 PATCH = "kubernetes.client.AppsV1Api.patch_namespaced_deployment"
-CHECK = "pubgrade_sidecar.controllers.check_image_availability"
+CHECK = "pubgrade_sidecar.controllers.check_image"
+# Outcomes of the availability check
+AVAILABLE = controllers.ImageCheck(available=True)
+MISSING = controllers.ImageCheck(available=False, reason="registry answered 404")
 REPOSITORY = "elixircloud/tesk-api"
 
 
@@ -204,7 +207,7 @@ def replace(index: int, old: str, new: str) -> list[dict[str, str]]:
 
 
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, new=read)
 def test_one_deployment_all_containers(
     mock_check: MagicMock, mock_patch: MagicMock, app: Flask
@@ -235,7 +238,7 @@ def test_one_deployment_without_the_repository(
 
 
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, new=read)
 def test_all_deployments(
     mock_check: MagicMock, mock_patch: MagicMock, app: Flask
@@ -263,7 +266,7 @@ def test_all_deployments(
 
 @pytest.mark.parametrize("label", ["tier=api", "tier", " tier = api "])
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, new=read)
 def test_all_deployments_with_label(
     mock_check: MagicMock,
@@ -316,7 +319,7 @@ def test_all_deployments_current(
 
 
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, new=read)
 def test_all_deployments_skips_missing(
     mock_check: MagicMock,
@@ -346,7 +349,7 @@ def test_all_deployments_read_fails(
 
 
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(LIST)
 @patch(READ, new=read)
 def test_all_deployments_listed_without_targets(
@@ -385,7 +388,7 @@ def test_all_deployments_invalid_tag(mock_read: MagicMock, app: Flask) -> None:
 
 
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, new=read)
 def test_one_deployment_other_registry(
     mock_check: MagicMock,
@@ -442,7 +445,7 @@ def status_of(app: Flask, name: str) -> dict[str, Any]:
 
 
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, new=read)
 def test_repositories_of_one_deployment_dont_replace_each_other(
     mock_check: MagicMock,
@@ -472,7 +475,7 @@ def test_repositories_of_one_deployment_dont_replace_each_other(
 
 
 @patch(PATCH)
-@patch(CHECK, return_value=False)
+@patch(CHECK, return_value=MISSING)
 @patch("pubgrade_sidecar.controllers.time.sleep")
 @patch(READ)
 def test_status_needs_every_target_container(
@@ -533,7 +536,7 @@ def test_status_reports_failure_of_any_repository(
 
 
 @patch(PATCH, side_effect=ApiException(status=422))
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, new=read)
 def test_changed_container_fails_the_delivery(
     mock_check: MagicMock, mock_patch: MagicMock, app: Flask
@@ -570,7 +573,7 @@ def test_changed_container_fails_the_delivery(
     ],
 )
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS["tesk-worker"])
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ)
 def test_patch_planned_from_current_deployment(
     mock_read: MagicMock,
@@ -610,7 +613,7 @@ def test_patch_planned_from_current_deployment(
     ],
 )
 @patch(PATCH)
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ)
 def test_nothing_to_patch_after_the_wait(
     mock_read: MagicMock,
@@ -649,7 +652,7 @@ def test_label_without_key_matches_none(
 
 
 @patch(PATCH, side_effect=lambda **kwargs: DEPLOYMENTS[kwargs["name"]])
-@patch(CHECK, return_value=True)
+@patch(CHECK, return_value=AVAILABLE)
 @patch(READ, new=read)
 def test_all_deployments_lists_only_rollouts(
     mock_check: MagicMock,
