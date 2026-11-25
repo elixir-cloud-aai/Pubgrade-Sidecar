@@ -203,8 +203,9 @@ or with `--set podSecurityContext.seccompProfile=null`. An empty map
 default; `seccompProfile.type: null` does.
 
 Up to chart 0.2.0, the security contexts were fixed in the template. When
-upgrading a release installed with such a chart, don't use
-`helm upgrade --reuse-values`: it takes the old release's values instead of
+upgrading a release installed with such a chart, or with chart 0.3.0 (which
+lacks the required `imageWait`, see [Waiting for images](#waiting-for-images),
+so the upgrade fails), don't use `helm upgrade --reuse-values`: it takes the old release's values instead of
 the new chart's defaults, which have no security contexts, so the pod would
 run without them. Pass your values again (`-f`), or use
 `--reset-then-reuse-values` (Helm 3.14 or later).
@@ -238,6 +239,72 @@ the Deployments' own `imagePullSecrets`. Registries that serve only HTTP, e.g.,
 one in the cluster, go in `insecureRegistries` (`host` or `host:port`;
 environment variable `INSECURE_REGISTRIES`, comma-separated); credentials for
 them are sent unencrypted.
+
+Docker Hub limits anonymous requests per source IP address (e.g.,
+`ratelimit-limit: 100;w=3600`, 100 per hour). In a cluster whose pods share
+one egress IP, e.g., CSC Rahti, other tenants can use the limit up, and every
+anonymous check then gets 429, also for public images. Authenticated checks
+count against the account instead: create a [personal access
+token](https://docs.docker.com/security/access-tokens/) with read-only access
+to public repositories and put it in `registryCredentials` as above, with
+`--docker-server=https://index.docker.io/v1/`.
+
+## Waiting for images
+
+A notification usually arrives right after its image was pushed, so the
+sidecar answers it at once (202) and waits for the image in the background:
+it checks the registry once, then up to `imageWait.retries` more times (3 by
+default), `imageWait.interval` seconds apart (30 by default; whole seconds in
+the chart), so for about 90 seconds of pauses. Outside the chart, the settings
+are the environment variables `IMAGE_WAIT_RETRIES` (0 to 100) and
+`IMAGE_WAIT_INTERVAL` (seconds above 0, up to 3600), the same ranges as in
+the chart; an invalid or out-of-range value keeps its default, with a warning
+in the log. With `retries: 0`, the sidecar checks once and doesn't wait.
+
+If the registry or its token service answers 429 or 503 with `Retry-After`,
+the next check waits that long instead, if it is longer than the interval.
+The pauses never add up to more than `retries` x `interval` seconds, and a
+pause that wouldn't fit ends the delivery at once. A delivery that a newer
+notification replaces during a pause stops within 5 seconds, also during a
+long pause, and frees its worker; a check that is running finishes first. Each waiting delivery holds one of the sidecar's 16
+workers, so keep the wait short.
+
+The checks themselves add their time. Each request has a timeout of 10
+seconds for connecting and for each read; a check makes up to three requests
+(the manifest, a token, the manifest again), so a registry that doesn't
+answer costs about 30 seconds per check. A registry that answers very slowly
+but steadily, or through a chain of redirects, can take longer, as the
+timeout applies per read, not to the whole check; registries come from the
+notifications of your own Pubgrade, for the Deployments' own images.
+
+Each failed check is logged at the level WARNING, with the reason: the
+status code of the registry or its token service with a short explanation,
+and its `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining` and
+`RateLimit-Reset` headers (or their `X-` forms), each only if its value has
+the header's own syntax (seconds or an HTTP date; numbers with an optional
+window, e.g., `100;w=3600`); or the class of the network error. Tokens,
+credentials, URLs and error messages never appear, e.g.:
+
+```text
+Check 1 of 4 for image elixircloud/tesk-api:2.0.0 failed: registry answered 429 (rate limit reached; ratelimit-remaining: 0;w=3600)
+```
+
+If the image is still missing after the last check, the delivery fails, and
+`GET /deployment/{name}` reports the reason of the last check in `detail`,
+e.g., "Image not available, or its registry not reachable: registry answered
+404 (image or tag not found)." The deployment stays as it was.
+
+### Troubleshooting "Image not available"
+
+| Reason | Likely cause | What to do |
+| --- | --- | --- |
+| `registry answered 404 (image or tag not found)` | The tag isn't (yet) in the registry, or the image name is wrong | Check the tag in the registry; push before notifying; a longer wait if pushes take longer |
+| `registry answered 401 (authentication failed)` | A private image without credentials, or a token or credentials that the registry refused | Check `registryCredentials` (see [Registries](#registries)) |
+| `token service answered 401 (authentication failed)`, `token service answered 403 (access denied)` | Credentials that the registry's token service refused, or without pull rights on the repository | Check `registryCredentials` (see [Registries](#registries)) |
+| `registry answered 429 (rate limit reached; ...)` | The registry's rate limit, e.g., Docker Hub's for anonymous requests from a shared egress IP | Set `registryCredentials`; with `ratelimit-remaining: 0`, waiting longer rarely helps |
+| `registry or token service not reachable (ConnectionError)`, `(Timeout)`, `(SSLError)` | DNS, egress rules or a proxy between the cluster and the registry, or TLS interception | Check egress from the sidecar's namespace, e.g., with `curl -I https://registry-1.docker.io/v2/` in a pod there |
+| `token service answered 429 (...)`, `token service answer too large`, `token service too slow` | The registry's token service (e.g., `auth.docker.io`) is rate-limited, down or slow | As for the registry's own 429; check the token service |
+| `token service answered unusably (JSONDecodeError)`, `token service answered no token` | The registry's token service answered something other than a token | Check the registry; often a proxy's error page |
 
 ## Refusing downgrades
 
@@ -286,7 +353,8 @@ default, and a notification they refuse changes nothing and gets a 409:
       version, it is refused, so that, e.g., a notification of the current
       tag doesn't cancel a waiting release. In turn, a waiting higher tag,
       even one that never appears in the registry, refuses lower
-      notifications until it fails (after about two minutes); `allowedTags`
+      notifications until it fails (after the [wait for its
+      image](#waiting-for-images), by default about 90 s); `allowedTags`
       doesn't change that.
     - **Values:** `true`, `1`, `yes` and `on` turn it on, and `false`, `0`,
       `no`, `off` and an empty value leave it off (in any case); any other

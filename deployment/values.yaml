@@ -54,6 +54,23 @@ registryCredentials:
   # Key of the credentials in the Secret; unused without `existingSecret`
   key: .dockerconfigjson
 
+# How long a notification waits for its image: the sidecar checks the registry
+# once, then up to `retries` more times, `interval` seconds apart (whole
+# seconds, 1 to 3600, and 0 to 100 retries; the pauses add up to at most
+# `retries` x `interval` seconds, plus the time of the checks, up to about
+# 30 s each against a registry that doesn't answer). After a 429 or 503 with
+# `Retry-After` (of the registry or its token service), the next check waits
+# that long instead, if it is longer and fits in the rest of the wait;
+# otherwise the delivery fails at once. A delivery replaced during a pause
+# stops within 5 s.
+# Each waiting delivery holds one of 16 workers. On Docker Hub, anonymous
+# checks share the rate limit of the cluster's egress IP: set
+# `registryCredentials` rather than waiting longer (see docs/deployment.md,
+# "Registries")
+imageWait:
+  retries: 3
+  interval: 30
+
 # Optional: registries (`host` or `host:port`) that are reached over HTTP
 # instead of HTTPS, e.g., a registry in the cluster. Credentials are sent to
 # them unencrypted

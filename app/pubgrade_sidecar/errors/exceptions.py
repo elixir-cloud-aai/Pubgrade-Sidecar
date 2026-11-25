@@ -25,9 +25,20 @@ class ImageUnavailable(NotFound):
 
     Only raised in the background, while a delivery waits for the image, so
     never returned to clients.
+
+    Attributes:
+        reason: Why the last check failed, safe to log and report (see
+            `ImageCheck` in `pubgrade_sidecar.controllers`), if known.
     """
 
-    pass
+    def __init__(self, reason: str | None = None) -> None:
+        """Record why the image is unavailable.
+
+        Args:
+            reason: Why the last check failed, if known.
+        """
+        super().__init__()
+        self.reason = reason
 
 
 class ImageRepositoryMismatch(Conflict):

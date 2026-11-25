@@ -1,12 +1,15 @@
 """Tests for the availability check of images in OCI registries."""
 
 import base64
+from email.utils import formatdate
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import threading
+import time
 from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 import uuid
@@ -20,6 +23,7 @@ from pubgrade_sidecar.controllers import check_image_availability
 HEAD = "pubgrade_sidecar.controllers.requests.head"
 GET = "pubgrade_sidecar.controllers.requests.get"
 REALM = "https://auth.example.org/token"
+NOT_REACHABLE = "registry or token service not reachable "
 
 
 def response(
@@ -241,10 +245,11 @@ def test_credentials_to_insecure_registry_itself(
 )
 @patch(HEAD)
 def test_token_refused(mock_head: MagicMock, token_response: Any) -> None:
-    """Test that the image isn't available without a token."""
+    """Test that without a token, the image counts as unavailable, unretried."""
     mock_head.side_effect = [bearer(), response(200)]
     with patch(GET, return_value=token_response):
         assert not check_image_availability("org/app", "1")
+    assert mock_head.call_count == 1
 
 
 @patch(HEAD)
@@ -413,7 +418,8 @@ def test_token_response_too_large(mock_head: MagicMock) -> None:
     chunk = b" " * 65536
     token_response.iter_content.return_value = iter([chunk] * 100)
     with patch(GET, return_value=token_response):
-        assert not check_image_availability("org/app", "1")
+        result = controllers.check_image("org/app", "1")
+    assert result.reason == "token service answer too large"
     assert mock_head.call_count == 1
     token_response.close.assert_called_once()
 
@@ -546,5 +552,248 @@ def test_token_response_too_slow(
     clock = iter([0.0, 5.0, 11.0, 12.0])
     monkeypatch.setattr(controllers.time, "monotonic", lambda: next(clock))
     with patch(GET, return_value=token_response):
-        assert not check_image_availability("org/app", "1")
+        result = controllers.check_image("org/app", "1")
+    assert result.reason == "token service too slow"
     assert mock_head.call_count == 1
+
+
+@pytest.mark.parametrize(
+    "status,hint",
+    [
+        (404, "registry answered 404 (image or tag not found)"),
+        (500, "registry answered 500"),
+    ],
+)
+@patch(HEAD)
+def test_reason_of_answer(mock_head: MagicMock, status: int, hint: str) -> None:
+    """Test that the check says which answer it got."""
+    mock_head.return_value = response(status)
+    result = controllers.check_image("org/app", "1")
+    assert not result.available
+    assert result.reason == hint
+    assert result.retry_after is None
+
+
+@patch(GET, return_value=response(403))
+@patch(HEAD, return_value=bearer())
+def test_reason_of_refused_token(mock_head: MagicMock, mock_get: MagicMock) -> None:
+    """Test that a refused token request is reported as the token service's."""
+    result = controllers.check_image("org/app", "1")
+    assert result.reason == "token service answered 403 (access denied)"
+
+
+@patch(GET)
+@patch(HEAD, return_value=bearer())
+def test_reason_of_rate_limited_token_service(
+    mock_head: MagicMock, mock_get: MagicMock
+) -> None:
+    """Test that a token service's rate limit is reported, with its wait."""
+    mock_get.return_value = response(
+        429, {"Retry-After": "60", "RateLimit-Remaining": "0"}
+    )
+    result = controllers.check_image("org/app", "1")
+    assert result.reason == (
+        "token service answered 429 (rate limit reached; retry-after: 60, "
+        "ratelimit-remaining: 0)"
+    )
+    assert result.retry_after == 60
+
+
+@patch(HEAD)
+def test_reason_of_failed_authentication(mock_head: MagicMock) -> None:
+    """Test that a 401 that no token or credentials answer is reported."""
+    mock_head.return_value = response(401)
+    result = controllers.check_image("org/app", "1")
+    assert result.reason == "registry answered 401 (authentication failed)"
+
+
+@patch(GET, return_value=response(200, body={"token": "secret-token"}))
+@patch(HEAD)
+def test_reason_of_rate_limit(mock_head: MagicMock, mock_get: MagicMock) -> None:
+    """Test that a rate limit is reported with its headers, without the token."""
+    mock_head.side_effect = [
+        bearer(),
+        response(
+            429,
+            {
+                "Retry-After": "120",
+                "RateLimit-Remaining": "0;w=3600",
+                "RateLimit-Limit": "100;w=3600",
+            },
+        ),
+    ]
+    result = controllers.check_image("org/app", "1")
+    assert not result.available
+    assert result.reason == (
+        "registry answered 429 (rate limit reached; retry-after: 120, "
+        "ratelimit-limit: 100;w=3600, ratelimit-remaining: 0;w=3600)"
+    )
+    assert result.retry_after == 120
+    assert "secret-token" not in str(result)
+
+
+@patch(HEAD)
+def test_rate_limit_without_retry_after(mock_head: MagicMock) -> None:
+    """Test that a 429 without `Retry-After` asks for no particular wait."""
+    mock_head.return_value = response(429, {"X-RateLimit-Remaining": "0"})
+    result = controllers.check_image("org/app", "1")
+    assert result.reason == (
+        "registry answered 429 (rate limit reached; ratelimit-remaining: 0)"
+    )
+    assert result.retry_after is None
+
+
+@patch(HEAD)
+def test_retry_after_as_date(mock_head: MagicMock) -> None:
+    """Test that `Retry-After` may be an HTTP date, also one in the past."""
+    later = time.time() + 300
+    mock_head.return_value = response(
+        503, {"Retry-After": formatdate(later, usegmt=True)}
+    )
+    result = controllers.check_image("org/app", "1")
+    assert result.retry_after is not None
+    assert 290 <= result.retry_after <= 300
+    mock_head.return_value = response(429, {"Retry-After": formatdate(0, usegmt=True)})
+    assert controllers.check_image("org/app", "1").retry_after == 0
+    # Without a time zone, as UTC
+    mock_head.return_value = response(429, {"Retry-After": formatdate(later)})
+    naive = controllers.check_image("org/app", "1").retry_after
+    assert naive is not None
+    assert 290 <= naive <= 300
+
+
+@pytest.mark.parametrize("value", ["soon", "-5", "1e9", "Wed, 99 Foo 2026"])
+@patch(HEAD)
+def test_unusable_retry_after(mock_head: MagicMock, value: str) -> None:
+    """Test that a `Retry-After` that isn't a delay or a date is ignored."""
+    mock_head.return_value = response(429, {"Retry-After": value})
+    assert controllers.check_image("org/app", "1").retry_after is None
+
+
+@patch(HEAD)
+def test_retry_after_only_on_rate_limit_or_unavailable(mock_head: MagicMock) -> None:
+    """Test that `Retry-After` counts only on 429 and 503."""
+    mock_head.return_value = response(404, {"Retry-After": "60"})
+    assert controllers.check_image("org/app", "1").retry_after is None
+
+
+@patch(HEAD)
+def test_header_values_sanitized(mock_head: MagicMock) -> None:
+    """Test that header values can't inject text into logs or the status."""
+    mock_head.return_value = response(
+        429,
+        {
+            "Retry-After": "1\nFAKE log line",
+            "RateLimit-Remaining": "x" * 200,
+        },
+    )
+    result = controllers.check_image("org/app", "1")
+    assert result.reason is not None
+    assert "\n" not in result.reason
+    assert "FAKE" not in result.reason
+    assert "x" * 65 not in result.reason
+    assert result.retry_after is None
+
+
+@patch(HEAD)
+def test_long_retry_after_date_honoured(mock_head: MagicMock) -> None:
+    """Test that a valid `Retry-After` counts even if it isn't quoted."""
+    date = formatdate(time.time() + 60, usegmt=True)
+    mock_head.return_value = response(429, {"Retry-After": date})
+    result = controllers.check_image("org/app", "1")
+    assert result.retry_after is not None
+    unquotable = {**controllers.QUOTED_HEADERS, "retry-after": re.compile("x")}
+    with patch.object(controllers, "QUOTED_HEADERS", unquotable):
+        unquoted = controllers.check_image("org/app", "1")
+    assert unquoted.reason == "registry answered 429 (rate limit reached)"
+    assert unquoted.retry_after is not None
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Retry-After": "https://evil.example.org/x"},
+        {"RateLimit-Remaining": "user:pw@host"},
+        {"RateLimit-Limit": "100;w=3600 https://x"},
+        {"RateLimit-Reset": "soon"},
+    ],
+)
+@patch(HEAD)
+def test_header_values_need_their_syntax(
+    mock_head: MagicMock, headers: dict[str, str]
+) -> None:
+    """Test that only values of a header's own syntax are quoted."""
+    mock_head.return_value = response(429, headers)
+    result = controllers.check_image("org/app", "1")
+    assert result.reason == "registry answered 429 (rate limit reached)"
+
+
+@patch(HEAD)
+def test_all_rate_limit_headers_quoted(mock_head: MagicMock) -> None:
+    """Test that limit, remaining and reset are quoted, also as `X-` headers."""
+    mock_head.return_value = response(
+        429,
+        {
+            "X-RateLimit-Limit": "100;w=3600",
+            "X-RateLimit-Remaining": "0;w=3600",
+            "X-RateLimit-Reset": "1800",
+        },
+    )
+    result = controllers.check_image("org/app", "1")
+    assert result.reason == (
+        "registry answered 429 (rate limit reached; ratelimit-limit: 100;w=3600, "
+        "ratelimit-remaining: 0;w=3600, ratelimit-reset: 1800)"
+    )
+
+
+@pytest.mark.parametrize("body", [{}, {"token": ""}, {"token": 5}])
+@patch(HEAD, return_value=bearer())
+def test_reason_of_missing_token(mock_head: MagicMock, body: Any) -> None:
+    """Test that a token service's answer without a token is reported."""
+    with patch(GET, return_value=response(200, body=body)):
+        result = controllers.check_image("org/app", "1")
+    assert result.reason == "token service answered no token"
+
+
+@pytest.mark.parametrize(
+    "error,reason",
+    [
+        (
+            requests.ConnectionError,
+            NOT_REACHABLE + "(ConnectionError)",
+        ),
+        (requests.Timeout, NOT_REACHABLE + "(Timeout)"),
+        (
+            requests.exceptions.SSLError,
+            NOT_REACHABLE + "(SSLError)",
+        ),
+    ],
+)
+@patch(HEAD)
+def test_reason_of_network_error(
+    mock_head: MagicMock, error: type[Exception], reason: str
+) -> None:
+    """Test that network errors are reported by class, without their message."""
+    mock_head.side_effect = error("https://user:password@registry.example.org/v2/")
+    result = controllers.check_image("org/app", "1")
+    assert not result.available
+    assert result.reason == reason
+    assert "password" not in str(result)
+
+
+@patch(GET)
+@patch(HEAD, return_value=bearer())
+def test_reason_of_unusable_token_response(
+    mock_head: MagicMock, mock_get: MagicMock
+) -> None:
+    """Test that a token service's unusable answer is reported as such."""
+    mock_get.return_value = response(200)
+    mock_get.return_value.iter_content.return_value = [b"not json"]
+    result = controllers.check_image("org/app", "1")
+    assert result.reason == "token service answered unusably (JSONDecodeError)"
+
+
+@patch(HEAD, return_value=response(200))
+def test_available_has_no_reason(mock_head: MagicMock) -> None:
+    """Test that an available image has no reason and no wait."""
+    assert controllers.check_image("org/app", "1") == controllers.ImageCheck(True)

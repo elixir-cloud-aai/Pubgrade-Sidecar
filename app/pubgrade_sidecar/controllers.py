@@ -4,9 +4,12 @@ import base64
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+from datetime import UTC
+from email.utils import parsedate_to_datetime
 import hmac
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -63,8 +66,16 @@ def _load_kube_config() -> None:
 _load_kube_config()
 
 apiV1 = client.AppsV1Api()
-MAX_RETRY = 3
-RETRY_INTERVAL = 30
+# Defaults of the wait for a notified image: checks after the first, and
+# seconds between them (`IMAGE_WAIT_RETRIES`, `IMAGE_WAIT_INTERVAL`), and the
+# largest values that are accepted, as in the chart
+IMAGE_WAIT_RETRIES = 3
+IMAGE_WAIT_INTERVAL = 30.0
+MAX_IMAGE_WAIT_RETRIES = 100
+MAX_IMAGE_WAIT_INTERVAL = 3600.0
+# Longest single sleep of a pause between checks: after each, a delivery that
+# a newer one replaced stops, so that it frees its worker
+PAUSE_STEP = 5.0
 REQUEST_TIMEOUT = 10
 # Hosts of Docker Hub in image names, as Pubgrade counts them
 DOCKER_HUB_PREFIXES = ("docker.io/", "index.docker.io/", "registry-1.docker.io/")
@@ -93,9 +104,55 @@ TOKEN_CHUNK_SIZE = 4096
 CHALLENGE_PARAMETER = re.compile(r'(\w+)="([^"]*)"')
 # The format of Docker image tags
 VALID_TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
+# Headers that the reason of a failed check quotes, in this order, with the
+# syntax that their values must have: others, e.g., with URLs, line breaks or
+# longer ones, are left out, so that a registry can't write into the logs.
+# `Retry-After` is seconds or an HTTP date; the rate-limit headers are
+# numbers with an optional window (`100;w=3600`), as Docker Hub sends them
+QUOTED_HEADERS = {
+    "retry-after": re.compile(
+        r"[0-9]{1,12}|[A-Z][a-z]{2}, [0-9]{2} [A-Z][a-z]{2} [0-9]{4} "
+        r"[0-9]{2}:[0-9]{2}:[0-9]{2} (GMT|[+-][0-9]{4})"
+    ),
+    "ratelimit-limit": re.compile(r"[0-9]{1,12}(;w=[0-9]{1,12})?"),
+    "ratelimit-remaining": re.compile(r"[0-9]{1,12}(;w=[0-9]{1,12})?"),
+    "ratelimit-reset": re.compile(r"[0-9]{1,12}"),
+}
+# `Retry-After` in seconds (otherwise, it is an HTTP date)
+DELAY_SECONDS = re.compile(r"[0-9]{1,12}")
+# Answers of registries after which `Retry-After` counts
+RETRY_STATUSES = frozenset({429, 503})
+# Explanations of the answers of registries, for the reason of a failed check
+STATUS_HINTS = {
+    401: "authentication failed",
+    403: "access denied",
+    404: "image or tag not found",
+    429: "rate limit reached",
+    503: "service unavailable",
+}
 # Values of `REFUSE_DOWNGRADES`; any other value counts as on
 SETTING_ON = frozenset({"1", "true", "yes", "on"})
 SETTING_OFF = frozenset({"", "0", "false", "no", "off"})
+
+
+@dataclass(frozen=True)
+class ImageCheck:
+    """Outcome of a check whether a registry has an image.
+
+    Attributes:
+        available: Whether the registry has the image.
+        reason: Why it isn't available, e.g., "registry answered 429 (rate
+            limit reached; ratelimit-remaining: 0)": the status and the
+            registry's `Retry-After` and rate-limit headers, or the class of
+            the network error. Never tokens, credentials, URLs or error
+            messages, so that it can be logged and reported.
+        retry_after: Seconds that the registry asks to wait before the next
+            request (`Retry-After` of a 429 or 503), if it says so.
+    """
+
+    available: bool
+    reason: str | None = None
+    retry_after: float | None = None
 
 
 @dataclass
@@ -131,9 +188,9 @@ _lock = threading.Lock()
 # to the end of its patch, so that a delivery that a newer one replaced can't
 # overwrite the newer one's image; status reports don't wait for it
 _patch_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
-# Each delivery holds a worker while it waits for its image (about two
-# minutes at most); a notification for all deployments starts one delivery
-# per deployment, and further ones wait for a free worker
+# Each delivery holds a worker while it waits for its image (by default
+# about 90 s, see `_image_wait`); a notification for all deployments starts
+# one delivery per deployment, and further ones wait for a free worker
 _executor = ThreadPoolExecutor(max_workers=16)
 
 
@@ -914,9 +971,10 @@ def _deliver(
                 delivery.state = "patched"
                 delivery.generation = patched.metadata.generation
                 delivery.uid = patched.metadata.uid
-    except ImageUnavailable:
-        logger.warning("Image of a notification isn't available.")
-        _fail(delivery, "Image not available, or its registry not reachable.")
+    except ImageUnavailable as exc:
+        suffix = f": {exc.reason}" if exc.reason else ""
+        logger.warning("Image %s:%s isn't available%s.", image_repo, image_tag, suffix)
+        _fail(delivery, f"Image not available, or its registry not reachable{suffix}.")
     except DowngradeRefused:
         # The deployment got a higher version during the wait
         logger.warning("Delivery refused, as it would be a downgrade.")
@@ -938,6 +996,75 @@ def _fail(delivery: _Delivery, detail: str) -> None:
         delivery.detail = detail
 
 
+def _image_wait() -> tuple[int, float]:
+    """Read the settings of the wait for a notified image.
+
+    `IMAGE_WAIT_RETRIES` is the number of checks after the first (a whole
+    number, 0 or more), `IMAGE_WAIT_INTERVAL` the seconds between them (a
+    number above 0). An invalid or empty setting keeps its default, with a
+    warning for an invalid one.
+
+    Returns:
+        The number of checks after the first, and the seconds between them.
+    """
+    retries = IMAGE_WAIT_RETRIES
+    value = os.getenv("IMAGE_WAIT_RETRIES", "").strip()
+    if value:
+        try:
+            retries = int(value)
+        except ValueError:
+            retries = -1
+        if not 0 <= retries <= MAX_IMAGE_WAIT_RETRIES:
+            retries = IMAGE_WAIT_RETRIES
+            logger.warning(
+                "IMAGE_WAIT_RETRIES isn't a whole number from 0 to %d; using %d.",
+                MAX_IMAGE_WAIT_RETRIES,
+                retries,
+            )
+    interval = IMAGE_WAIT_INTERVAL
+    value = os.getenv("IMAGE_WAIT_INTERVAL", "").strip()
+    if value:
+        try:
+            interval = float(value)
+        except ValueError:
+            interval = -1.0
+        if not (math.isfinite(interval) and 0 < interval <= MAX_IMAGE_WAIT_INTERVAL):
+            interval = IMAGE_WAIT_INTERVAL
+            logger.warning(
+                "IMAGE_WAIT_INTERVAL isn't a number of seconds above 0 and up to "
+                "%g; using %g.",
+                MAX_IMAGE_WAIT_INTERVAL,
+                interval,
+            )
+    return retries, interval
+
+
+def _pause(
+    seconds: float, delivery: _Delivery, deployment_name: str, image_repo: str
+) -> bool:
+    """Wait between checks, while a delivery is current.
+
+    Sleeps in steps of at most `PAUSE_STEP` seconds, so that a delivery that
+    a newer notification replaced stops soon and frees its worker.
+
+    Args:
+        seconds: Seconds to wait.
+        delivery: Record of the delivery.
+        deployment_name: Name of the deployment.
+        image_repo: Canonical repository of the image.
+
+    Returns:
+        True after the whole wait, False as soon as the delivery was replaced.
+    """
+    while seconds > 0:
+        step = min(seconds, PAUSE_STEP)
+        time.sleep(step)
+        seconds -= step
+        if not _is_current(delivery, deployment_name, image_repo):
+            return False
+    return True
+
+
 def _wait_for_image(
     image_repo: str,
     image_tag: str,
@@ -945,6 +1072,13 @@ def _wait_for_image(
     deployment_name: str,
 ) -> bool:
     """Wait until an image is available, while a delivery is current.
+
+    Checks the image up to `IMAGE_WAIT_RETRIES` + 1 times, `IMAGE_WAIT_INTERVAL`
+    seconds apart (see `_image_wait`), and logs each failed check with its
+    reason. After an answer with `Retry-After` (429 or 503) that asks for
+    longer, the next check waits that long instead. The waits add up to at
+    most retries times interval: a wait that wouldn't fit ends the wait at
+    once.
 
     Args:
         image_repo: Canonical repository of the image.
@@ -956,16 +1090,52 @@ def _wait_for_image(
         True once the image is available, False if the delivery was replaced.
 
     Raises:
-        ImageUnavailable: If the image is still missing after all tries.
+        ImageUnavailable: If the image is still missing after all tries, with
+            the reason of the last check.
     """
-    for attempt in range(MAX_RETRY + 1):
+    retries, interval = _image_wait()
+    remaining = retries * interval
+    # Tolerance of the float sums, so that fractional intervals keep all checks
+    slack = 1e-6
+    reason: str | None = None
+    for attempt in range(retries + 1):
         if not _is_current(delivery, deployment_name, image_repo):
             return False
-        if check_image_availability(image_repo, image_tag):
+        result = check_image(image_repo, image_tag)
+        if result.available:
             return _is_current(delivery, deployment_name, image_repo)
-        if attempt < MAX_RETRY:
-            time.sleep(RETRY_INTERVAL)
-    raise ImageUnavailable
+        reason = result.reason or "unknown reason"
+        logger.warning(
+            "Check %d of %d for image %s:%s failed: %s",
+            attempt + 1,
+            retries + 1,
+            image_repo,
+            image_tag,
+            reason,
+        )
+        if attempt == retries:
+            break
+        retry_after = result.retry_after
+        if retry_after is not None and retry_after > interval:
+            if retry_after > remaining + slack:
+                reason += (
+                    f"; it asks to wait {math.ceil(retry_after)} s, "
+                    f"longer than the remaining wait of {math.ceil(remaining)} s"
+                )
+                break
+            delay = retry_after
+        else:
+            delay = interval
+            if delay > remaining + slack:
+                reason += (
+                    f"; the next check, {delay:g} s later, wouldn't fit in the "
+                    f"remaining wait of {math.ceil(remaining)} s"
+                )
+                break
+        if not _pause(delay, delivery, deployment_name, image_repo):
+            return False
+        remaining -= delay
+    raise ImageUnavailable(reason)
 
 
 def _registry(image_repo: str) -> tuple[str, str]:
@@ -1046,6 +1216,23 @@ def _insecure_registries() -> list[str]:
     ]
 
 
+class _TokenServiceError(Exception):
+    """Raised when a registry's token service refuses or fails to give a token.
+
+    Attributes:
+        check: Outcome of the image check, with the token service's reason.
+    """
+
+    def __init__(self, check: ImageCheck) -> None:
+        """Record the outcome.
+
+        Args:
+            check: Outcome of the image check.
+        """
+        super().__init__(check.reason)
+        self.check = check
+
+
 def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
     """Request a token from the token service that a registry names.
 
@@ -1067,6 +1254,8 @@ def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
         requests.RequestException: If the token service can't be reached.
         ValueError: If the response isn't JSON.
         AttributeError: If the response isn't a JSON object.
+        _TokenServiceError: If the token service answers other than 200,
+            without a token, or too much or too slowly.
     """
     realm = fields["realm"]
     # Over HTTP, only an insecure registry's own token service, as the token
@@ -1086,18 +1275,24 @@ def _bearer_token(fields: dict[str, str], host: str, scheme: str) -> str | None:
     )
     try:
         if token_response.status_code != 200:
-            return None
+            raise _TokenServiceError(_answer_reason(token_response, "token service"))
         content = b""
         for chunk in token_response.iter_content(chunk_size=TOKEN_CHUNK_SIZE):
             content += chunk
             # Also a service that trickles its response stops in time
-            if len(content) > MAX_TOKEN_RESPONSE or time.monotonic() > deadline:
-                return None
+            if len(content) > MAX_TOKEN_RESPONSE:
+                raise _TokenServiceError(
+                    ImageCheck(False, "token service answer too large")
+                )
+            if time.monotonic() > deadline:
+                raise _TokenServiceError(ImageCheck(False, "token service too slow"))
     finally:
         token_response.close()
     body = json.loads(content)
     token = body.get("token") or body.get("access_token")
-    return token if isinstance(token, str) and token else None
+    if not (isinstance(token, str) and token):
+        raise _TokenServiceError(ImageCheck(False, "token service answered no token"))
+    return token
 
 
 def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
@@ -1121,6 +1316,8 @@ def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
             can't be reached.
         ValueError: If the token service's response isn't JSON.
         AttributeError: If the token service's response isn't a JSON object.
+        _TokenServiceError: If the token service refuses or fails to give a
+            token.
     """
     headers = {"Accept": MANIFEST_TYPES}
     response = requests.head(
@@ -1155,8 +1352,111 @@ def _head_manifest(url: str, host: str, scheme: str) -> requests.Response:
     )
 
 
-def check_image_availability(image_repo: str, tag: str = "latest") -> bool:
-    """Check whether the registry of an image has it.
+def _raw_header(response: requests.Response, name: str) -> str | None:
+    """Read a header of a registry's answer, whatever its value.
+
+    Args:
+        response: The registry's answer.
+        name: Name of the header, in lower case.
+
+    Returns:
+        The value, stripped, or None if the header is missing.
+    """
+    for key, value in response.headers.items():
+        if key.lower() == name:
+            return str(value).strip()
+    return None
+
+
+def _header(response: requests.Response, name: str) -> str | None:
+    """Read a header of a registry's answer for the reason of a failed check.
+
+    Args:
+        response: The registry's answer.
+        name: Name of the header, in lower case.
+
+    Returns:
+        The value, or None if the header is missing or its value hasn't the
+        header's syntax (see `QUOTED_HEADERS`).
+    """
+    value = _raw_header(response, name)
+    return value if value and QUOTED_HEADERS[name].fullmatch(value) else None
+
+
+def _x_header(response: requests.Response, name: str) -> str | None:
+    """Read the older `X-` form of a rate-limit header, with its syntax.
+
+    Args:
+        response: The registry's answer.
+        name: Name of the header without `x-`, in lower case.
+
+    Returns:
+        The value, or None if missing or not of the header's syntax.
+    """
+    value = _raw_header(response, f"x-{name}")
+    return value if value and QUOTED_HEADERS[name].fullmatch(value) else None
+
+
+def _retry_after(value: str | None) -> float | None:
+    """Read the wait that `Retry-After` asks for.
+
+    Args:
+        value: Value of the header: seconds or an HTTP date.
+
+    Returns:
+        Seconds to wait, 0 for a date in the past, or None if the value is
+        neither (or a date without a time zone: then UTC).
+    """
+    if value is None:
+        return None
+    if DELAY_SECONDS.fullmatch(value):
+        return float(value)
+    try:
+        moment = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        return None
+    # Without a time zone (`-0000`), the date counts as UTC, as HTTP dates are
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return max(0.0, moment.timestamp() - time.time())
+
+
+def _answer_reason(response: requests.Response, source: str = "registry") -> ImageCheck:
+    """Explain an answer of a registry, or its token service, other than 200.
+
+    Args:
+        response: The answer.
+        source: Who answered, for the reason.
+
+    Returns:
+        The outcome of the check, with the status, an explanation of it, and
+        the registry's `Retry-After` and rate-limit headers, if any.
+    """
+    status = response.status_code
+    details = []
+    for name in QUOTED_HEADERS:
+        value = _header(response, name)
+        if value is None and name.startswith("ratelimit-"):
+            value = _x_header(response, name)
+        if value:
+            details.append(f"{name}: {value}")
+    parts = [part for part in (STATUS_HINTS.get(status), ", ".join(details)) if part]
+    reason = f"{source} answered {status}"
+    if parts:
+        reason += f" ({'; '.join(parts)})"
+    return ImageCheck(
+        available=False,
+        reason=reason,
+        retry_after=(
+            _retry_after(_raw_header(response, "retry-after"))
+            if status in RETRY_STATUSES
+            else None
+        ),
+    )
+
+
+def check_image(image_repo: str, tag: str = "latest") -> ImageCheck:
+    """Check whether the registry of an image has it, and if not, why not.
 
     Asks the registry for the image's manifest (OCI distribution API), over
     HTTPS, or HTTP for the hosts in `INSECURE_REGISTRIES`, with a token or
@@ -1167,14 +1467,41 @@ def check_image_availability(image_repo: str, tag: str = "latest") -> bool:
         tag: Tag of the image.
 
     Returns:
-        Whether the image is available. Network and authentication errors
-        count as not available.
+        The outcome. Network and authentication errors count as not
+        available; the reason names the status or the class of the error,
+        never its message, which could quote URLs.
     """
     host, name = _registry(image_repo)
     scheme = "http" if host in _insecure_registries() else "https"
     url = f"{scheme}://{host}/v2/{name}/manifests/{tag}"
     try:
         response = _head_manifest(url, host, scheme)
-    except (requests.RequestException, ValueError, AttributeError):
-        return False
-    return response.status_code == 200
+    except _TokenServiceError as exc:
+        return exc.check
+    except requests.RequestException as exc:
+        return ImageCheck(
+            available=False,
+            reason=f"registry or token service not reachable ({type(exc).__name__})",
+        )
+    except (ValueError, AttributeError) as exc:
+        return ImageCheck(
+            available=False,
+            reason=f"token service answered unusably ({type(exc).__name__})",
+        )
+    if response.status_code == 200:
+        return ImageCheck(available=True)
+    return _answer_reason(response)
+
+
+def check_image_availability(image_repo: str, tag: str = "latest") -> bool:
+    """Check whether the registry of an image has it.
+
+    Args:
+        image_repo: Canonical repository of the image, see `_parse_image`.
+        tag: Tag of the image.
+
+    Returns:
+        Whether the image is available (see `check_image`, which also says
+        why not).
+    """
+    return check_image(image_repo, tag).available
