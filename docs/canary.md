@@ -20,15 +20,20 @@ Each run goes through the whole chain, in one job ("Canary rollout"):
    and pushes it to Docker Hub. The image is about 2 MB: BusyBox's `httpd`,
    run as any non-root user on port 8080, which serves `/version.json`, e.g.,
    `{"version": "1.0.42", "commit": "<sha>"}`.
-2. **Notify and wait:** registers the image as a build of the repository
+2. **Notify and wait:** checks the inputs (`CANARY_SITES`, Pubgrade's URL
+   and repository), so that a bad value changes no site, then registers the
+   image as a build of the repository
    `pubgrade-canary` at Pubgrade, with Pubgrade's
    [notify action](https://github.com/elixir-cloud-aai/Pubgrade/tree/v0.3.0/actions/notify),
    and Pubgrade notifies every subscription of that repository, one per site.
    Right after that, it polls `/version.json` of each site until it
-   serves the new version (10 minutes at most), and then checks that
-   Pubgrade delivered every notification. The job summary lists, per site,
-   the gap from the notification to the new version (accurate to the polling
-   interval of 10 s), and per subscription Pubgrade's result.
+   serves the new version (10 minutes at most; redirects aren't followed, so
+   each site must answer for itself), and then checks that Pubgrade
+   delivered every notification, and to as many subscriptions as there are
+   sites. The job summary lists, per site, the gap from the notification to
+   the new version (an upper bound: it includes the seconds of the notify
+   action and up to the polling interval of 10 s), and per subscription
+   Pubgrade's result.
 
 At each site, the canary sidecar checks the tag in the registry, patches the
 canary Deployment, and Kubernetes rolls it out. The versions only grow, so
@@ -42,8 +47,10 @@ checks that it serves its version as an arbitrary user (job "Canary image").
 
 ## Configuration
 
-The workflow runs in the GitHub environment `canary`. Restrict its deployment
-branches to `dev`, and add no required reviewers, so that the schedule can run.
+The workflow runs in the GitHub environment `canary`, and only from `dev`.
+Restrict the environment's deployment branches to `dev` as well, so that no
+other branch gets its secrets, and add no required reviewers, so that the
+schedule can run.
 
 | Name | Kind | Value |
 | --- | --- | --- |
@@ -76,7 +83,9 @@ upgrade it, subscribed at Pubgrade:
    sidecar of its own keeps the canary away from the service sidecars and
    their allowed tags, and can be removed without touching them.
 3. Subscribe the sidecar to the repository `pubgrade-canary` at Pubgrade
-   (type `tag`, value `*`).
+   (type `tag`, value `*`). Keep one subscription per site in
+   `CANARY_SITES`: the run fails if the numbers differ, so that no
+   subscription goes unchecked.
 4. Add the site's base URL to `CANARY_SITES`, and start the workflow by hand
    (`gh workflow run canary.yml --repo elixir-cloud-aai/Pubgrade-Sidecar`).
 

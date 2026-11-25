@@ -42,6 +42,8 @@ class Stub(BaseHTTPRequestHandler):
         status, body = answers.pop(0) if len(answers) > 1 else answers[0]
         payload = body if isinstance(body, bytes) else json.dumps(body).encode()
         self.send_response(status)
+        if 300 <= status < 400 and isinstance(body, dict) and "location" in body:
+            self.send_header("Location", body["location"])
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
@@ -124,6 +126,9 @@ def version(value: str) -> tuple[int, dict[str, str]]:
         ('["https://a.example.org", "https://a.example.org/"]', "twice"),
         ('["http://a.example.org"]', "HTTPS"),
         ('["https://a.example.org?x=1"]', "query"),
+        ('["https://a.example.org?"]', "query"),
+        ('["https://a.example.org#"]', "query"),
+        ('["https://[::1"]', "valid URL"),
         ('["https://user:pw@a.example.org"]', "credentials"),
         ("[1]", "URL"),
     ],
@@ -378,6 +383,7 @@ def test_deliveries_time_out(stub: str) -> None:
             clock=clock.time,
             sleep=clock.sleep,
         )
+    assert clock.sleeps == [5, 5]
 
 
 def test_deliveries_of_missing_build(stub: str) -> None:
@@ -467,6 +473,47 @@ def test_deliveries_unreachable_retried() -> None:
             sleep=clock.sleep,
         )
     assert clock.sleeps == [5, 5]
+
+
+def sites(count: int) -> str:
+    """Build a list of canary sites.
+
+    Args:
+        count: Number of sites.
+
+    Returns:
+        JSON list of distinct base URLs.
+    """
+    return json.dumps([f"https://s{index}.example.org" for index in range(count)])
+
+
+def test_redirect_not_followed(stub: str, capsys: pytest.CaptureFixture[str]) -> None:
+    """Test that a site that redirects elsewhere doesn't count as rolled out."""
+    Stub.routes = {
+        "/a/version.json": [(302, {"location": f"{stub}/b/version.json"})],
+        "/b/version.json": [version("1.0.2")],
+    }
+    clock = Clock()
+    gaps = canary.wait_for_version(
+        [f"{stub}/a"],
+        "1.0.2",
+        since=1000.0,
+        timeout=10,
+        interval=10,
+        clock=clock.time,
+        sleep=clock.sleep,
+    )
+    assert gaps == {f"{stub}/a": None}
+    assert "status 302" in capsys.readouterr().out
+    assert "/b/version.json" not in Stub.calls
+
+
+@pytest.mark.parametrize(
+    "remaining,expected", [(100.0, 10.0), (4.0, 4.0), (0.2, 1.0), (-5.0, 1.0)]
+)
+def test_request_timeout(remaining: float, expected: float) -> None:
+    """Test that requests end with the deadline, but get a second at least."""
+    assert canary._request_timeout(remaining) == expected
 
 
 def run_main(
@@ -566,6 +613,8 @@ def test_main_deliveries(
             "r1",
             "--build",
             "b1",
+            "--sites",
+            sites(max(len(results), 1)),
             "--allow-http",
         ],
         tmp_path,
@@ -630,18 +679,96 @@ def test_invalid_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 
 @pytest.mark.parametrize(
     "url",
-    ["https://", "https://user:pw@pubgrade.example.org", "https://p.example.org?x=1"],
+    [
+        "https://",
+        "https://user:pw@pubgrade.example.org",
+        "https://p.example.org?x=1",
+        "https://p.example.org?",
+        "https://[::1",
+    ],
 )
 def test_invalid_pubgrade_url_refused(
     url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Test that an unusable URL of Pubgrade is an input error at once."""
     status, _ = run_main(
-        ["deliveries", "--url", url, "--repository", "r1", "--build", "b1"],
+        [
+            "deliveries",
+            "--url",
+            url,
+            "--repository",
+            "r1",
+            "--build",
+            "b1",
+            "--sites",
+            sites(1),
+        ],
         tmp_path,
         monkeypatch,
     )
     assert status == 1
+
+
+def test_main_deliveries_need_one_subscription_per_site(
+    stub: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test that subscriptions without a checked site fail the check."""
+    Stub.routes = {"/repositories/r1/builds/b1": [(200, build(["delivered"] * 2))]}
+    status, _ = run_main(
+        [
+            "deliveries",
+            "--url",
+            stub,
+            "--repository",
+            "r1",
+            "--build",
+            "b1",
+            "--sites",
+            sites(1),
+            "--allow-http",
+        ],
+        tmp_path,
+        monkeypatch,
+    )
+    assert status == 1
+    assert "2 subscriptions, but 1 sites" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "site_list,url,repository,expected",
+    [
+        (sites(2), "https://pubgrade.example.org", "r1", 0),
+        ("[]", "https://pubgrade.example.org", "r1", 1),
+        (sites(1), "https://pubgrade.example.org?", "r1", 1),
+        (sites(1), "https://pubgrade.example.org", "../r1", 1),
+    ],
+)
+def test_main_check(
+    site_list: str,
+    url: str,
+    repository: str,
+    expected: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that the inputs are checked before anything is notified."""
+    status, _ = run_main(
+        [
+            "check",
+            "--sites",
+            site_list,
+            "--url",
+            url,
+            "--repository",
+            repository,
+        ],
+        tmp_path,
+        monkeypatch,
+    )
+    assert status == expected
 
 
 def test_pubgrade_over_http_refused(
@@ -657,6 +784,8 @@ def test_pubgrade_over_http_refused(
             "r1",
             "--build",
             "b1",
+            "--sites",
+            sites(1),
         ],
         tmp_path,
         monkeypatch,

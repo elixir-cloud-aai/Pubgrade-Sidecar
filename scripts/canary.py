@@ -7,7 +7,8 @@ The workflow (`.github/workflows/canary.yml`) pushes a new canary image
   new version, and measures the gap per site, from the notification to the
   first answer with the new version.
 - `deliveries`: reads the build at Pubgrade until its notifications are done,
-  and checks that every subscription got it (`delivered`).
+  and checks that every subscription got it (`delivered`), one per site.
+- `check`: checks the inputs, before anything is notified.
 
 Each command writes a table to the job summary (the file in
 `GITHUB_STEP_SUMMARY`, if set), prints errors as GitHub annotations to
@@ -17,7 +18,9 @@ Usage:
     `canary.py rollout --sites <JSON list of URLs> --version <X.Y.Z>
     --since <epoch seconds> [--timeout 600] [--interval 10]`
     `canary.py deliveries --url <Pubgrade URL> --repository <id> --build <id>
-    [--timeout 120] [--interval 5]`
+    --sites <JSON list of URLs> [--timeout 120] [--interval 5]`
+    `canary.py check --sites <JSON list of URLs> --url <Pubgrade URL>
+    --repository <id>`
 
 Only the stdlib is used, so the workflow runs it without installing the app.
 """
@@ -35,7 +38,7 @@ import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 # Largest answer that is read, in bytes
 MAX_RESPONSE = 64 * 1024
@@ -44,13 +47,29 @@ REQUEST_TIMEOUT = 10
 # (`1.0.<run number * 100 + attempt>`)
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 # Identifiers of Pubgrade (repositories, builds), which go into URL paths
+IDENTIFIER = re.compile(r"[A-Za-z0-9._-]{1,64}")
 # Client errors that are worth another try (timeout, rate limit)
 RETRIED = frozenset({408, 429})
-IDENTIFIER = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
 class CanaryError(Exception):
     """Raised when an input or an answer makes the check impossible."""
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    """Refuse redirects: a site must answer for itself, from its own URL."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        """Follow no redirect, so that the 3xx answer is returned as is.
+
+        Args:
+            *args: Arguments of the redirect (unused).
+            **kwargs: Keyword arguments of the redirect (unused).
+        """
+
+
+# Opener without redirects (`urlopen` follows them, also to other hosts)
+OPENER = build_opener(_NoRedirect)
 
 
 def schemes(allow_http: bool) -> tuple[str, ...]:
@@ -63,6 +82,36 @@ def schemes(allow_http: bool) -> tuple[str, ...]:
         `https`, and `http` if allowed.
     """
     return ("https", "http") if allow_http else ("https",)
+
+
+def check_url(url: str, allow_http: bool, what: str) -> str:
+    """Check a base URL that paths are appended to.
+
+    Args:
+        url: The URL.
+        allow_http: Whether plain HTTP is allowed (local tests only).
+        what: What the URL is of, for the errors.
+
+    Returns:
+        The URL without a trailing slash.
+
+    Raises:
+        CanaryError: If it can't be parsed, isn't HTTPS (unless allowed), has
+            no host, or has credentials, a query or a fragment (also empty
+            ones).
+    """
+    try:
+        parts = urlsplit(url)
+        hostname = parts.hostname
+    except ValueError as exc:
+        raise CanaryError(f"{what} isn't a valid URL: {url!r}") from exc
+    if parts.scheme not in schemes(allow_http) or not hostname:
+        raise CanaryError(f"{what} must be an HTTPS URL: {url!r}")
+    if parts.username or parts.password:
+        raise CanaryError(f"{what} must not contain credentials.")
+    if "?" in url or "#" in url:
+        raise CanaryError(f"{what} must not have a query or fragment: {url!r}")
+    return url.rstrip("/")
 
 
 def parse_sites(text: str, allow_http: bool = False) -> list[str]:
@@ -92,14 +141,7 @@ def parse_sites(text: str, allow_http: bool = False) -> list[str]:
     for site in sites:
         if not isinstance(site, str):
             raise CanaryError("Each site must be a URL (a string).")
-        parts = urlsplit(site)
-        if parts.scheme not in schemes(allow_http) or not parts.hostname:
-            raise CanaryError(f"Sites must be HTTPS URLs: {site!r}")
-        if parts.username or parts.password:
-            raise CanaryError("Site URLs must not contain credentials.")
-        if parts.query or parts.fragment:
-            raise CanaryError(f"Site URLs must not have a query or fragment: {site!r}")
-        base = site.rstrip("/")
+        base = check_url(site, allow_http, "A site")
         if base in result:
             raise CanaryError(f"A site is listed twice: {base!r}")
         result.append(base)
@@ -124,15 +166,17 @@ def check_identifier(value: str, name: str) -> str:
     return value
 
 
-def fetch_json(url: str) -> tuple[int, Any]:
-    """Get a JSON document.
+def fetch_json(url: str, timeout: float = REQUEST_TIMEOUT) -> tuple[int, Any]:
+    """Get a JSON document, without following redirects.
 
     Args:
         url: URL of the document.
+        timeout: Seconds to wait for the server.
 
     Returns:
         The status and the parsed body, or None as the body if it isn't JSON
-        or is larger than `MAX_RESPONSE`.
+        or is larger than `MAX_RESPONSE`. A redirect is returned as its 3xx
+        status.
 
     Raises:
         URLError: If the server can't be reached (also if its host name is
@@ -140,7 +184,7 @@ def fetch_json(url: str) -> tuple[int, Any]:
     """
     request = Request(url, headers={"Accept": "application/json"})  # noqa: S310
     try:
-        with urlopen(request, timeout=REQUEST_TIMEOUT) as response:  # noqa: S310
+        with OPENER.open(request, timeout=timeout) as response:
             status = response.status
             content = response.read(MAX_RESPONSE + 1)
     except HTTPError as exc:
@@ -155,18 +199,31 @@ def fetch_json(url: str) -> tuple[int, Any]:
         return status, None
 
 
-def _seen(site: str, version: str) -> bool:
+def _request_timeout(remaining: float) -> float:
+    """Limit a request to the time that is left, but give it a second.
+
+    Args:
+        remaining: Seconds left until the deadline.
+
+    Returns:
+        Seconds to wait for the server.
+    """
+    return min(REQUEST_TIMEOUT, max(remaining, 1.0))
+
+
+def _seen(site: str, version: str, timeout: float = REQUEST_TIMEOUT) -> bool:
     """Ask a canary site which version it serves.
 
     Args:
         site: Base URL of the site.
         version: The version to wait for.
+        timeout: Seconds to wait for the site.
 
     Returns:
         Whether the site serves the version; prints why not otherwise.
     """
     try:
-        status, body = fetch_json(f"{site}/version.json")
+        status, body = fetch_json(f"{site}/version.json", timeout)
     except (URLError, OSError) as exc:
         print(f"{site}: not yet ({type(exc).__name__})")
         return False
@@ -208,7 +265,9 @@ def wait_for_version(
     gaps: dict[str, float | None] = dict.fromkeys(sites)
     while True:
         for site in sites:
-            if gaps[site] is None and _seen(site, version):
+            if gaps[site] is None and _seen(
+                site, version, _request_timeout(deadline - clock())
+            ):
                 gaps[site] = clock() - since
         remaining = deadline - clock()
         if all(gap is not None for gap in gaps.values()) or remaining <= 0:
@@ -255,7 +314,7 @@ def wait_for_deliveries(
     deadline = clock() + timeout
     while True:
         try:
-            status, body = fetch_json(target)
+            status, body = fetch_json(target, _request_timeout(deadline - clock()))
         except (URLError, OSError) as exc:
             problem = f"Pubgrade not reachable ({type(exc).__name__})."
         else:
@@ -352,15 +411,10 @@ def _deliveries(args: argparse.Namespace) -> int:
     Raises:
         CanaryError: If an input is invalid or Pubgrade's answer unusable.
     """
-    parts = urlsplit(args.url)
-    if parts.scheme not in schemes(args.allow_http) or not parts.hostname:
-        raise CanaryError("Pubgrade's URL must be an HTTPS URL.")
-    if parts.username or parts.password or parts.query or parts.fragment:
-        raise CanaryError(
-            "Pubgrade's URL must not have credentials, a query or a fragment."
-        )
+    url = check_url(args.url, args.allow_http, "Pubgrade's URL")
+    expected = len(parse_sites(args.sites, allow_http=args.allow_http))
     notifications = wait_for_deliveries(
-        args.url, args.repository, args.build, args.timeout, args.interval
+        url, args.repository, args.build, args.timeout, args.interval
     )
     lines = [
         "### Pubgrade notifications",
@@ -383,7 +437,32 @@ def _deliveries(args: argparse.Namespace) -> int:
             f"Subscription {item.get('subscription_id')}: {item.get('result')}"
             f" (HTTP status {item.get('http_status')})."
         )
+    if len(notifications) != expected:
+        _error(
+            f"Pubgrade notified {len(notifications)} subscriptions, but"
+            f" {expected} sites are checked: subscriptions and CANARY_SITES"
+            " must match, one per site."
+        )
+        return 1
     return 1 if failed else 0
+
+
+def _check(args: argparse.Namespace) -> int:
+    """Run the command `check`: check the inputs before anything is notified.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit status.
+
+    Raises:
+        CanaryError: If an input is invalid.
+    """
+    parse_sites(args.sites, allow_http=args.allow_http)
+    check_url(args.url, args.allow_http, "Pubgrade's URL")
+    check_identifier(args.repository, "repository")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -415,10 +494,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     deliveries.add_argument("--url", required=True)
     deliveries.add_argument("--repository", required=True)
     deliveries.add_argument("--build", required=True)
+    deliveries.add_argument("--sites", required=True)
     deliveries.add_argument("--timeout", type=float, default=120)
     deliveries.add_argument("--interval", type=float, default=5)
+    check = commands.add_parser(
+        "check", parents=[common], help="check the inputs before notifying"
+    )
+    check.add_argument("--sites", required=True)
+    check.add_argument("--url", required=True)
+    check.add_argument("--repository", required=True)
     args = parser.parse_args(argv)
-    run = _rollout if args.command == "rollout" else _deliveries
+    run = {"rollout": _rollout, "deliveries": _deliveries, "check": _check}[
+        args.command
+    ]
     try:
         return run(args)
     except (CanaryError, URLError, OSError) as exc:

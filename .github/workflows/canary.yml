@@ -36,7 +36,10 @@ jobs:
   # version, and the gaps are measured from the notification on one clock
   rollout:
     name: Canary rollout
-    if: ${{ github.repository_owner == 'elixir-cloud-aai' || vars.DOCKERHUB_ORG != '' }}
+    # Only from `dev` (the environment `canary` allows only `dev` as well)
+    if: >-
+      github.ref == 'refs/heads/dev'
+      && (github.repository_owner == 'elixir-cloud-aai' || vars.DOCKERHUB_ORG != '')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: canary
@@ -89,6 +92,18 @@ jobs:
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Canary not configured (environment canary): image pushed, nothing notified"
           fi
+      # Before anything is notified, so that bad inputs change no site
+      - name: Check inputs
+        if: steps.config.outputs.configured == 'true'
+        env:
+          PUBGRADE_URL: ${{ vars.PUBGRADE_URL }}
+          REPOSITORY_ID: ${{ vars.PUBGRADE_CANARY_REPOSITORY_ID }}
+          SITES: ${{ vars.CANARY_SITES }}
+        run: |
+          python3 scripts/canary.py check --sites "${SITES}" \
+            --url "${PUBGRADE_URL}" --repository "${REPOSITORY_ID}"
+      # Before the notification, which may already deliver it: the gaps are
+      # an upper bound, by the seconds the notify action takes
       - name: Note the time
         id: since
         if: steps.config.outputs.configured == 'true'
@@ -121,6 +136,8 @@ jobs:
           PUBGRADE_URL: ${{ vars.PUBGRADE_URL }}
           REPOSITORY_ID: ${{ vars.PUBGRADE_CANARY_REPOSITORY_ID }}
           BUILD_ID: ${{ steps.notify.outputs.build-id }}
+          SITES: ${{ vars.CANARY_SITES }}
         run: |
           python3 scripts/canary.py deliveries --url "${PUBGRADE_URL}" \
-            --repository "${REPOSITORY_ID}" --build "${BUILD_ID}"
+            --repository "${REPOSITORY_ID}" --build "${BUILD_ID}" \
+            --sites "${SITES}"
