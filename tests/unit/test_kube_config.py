@@ -78,7 +78,7 @@ def test_load_kube_config_in_cluster_fails(
     mock_incluster.assert_called_once_with()
 
 
-@pytest.mark.parametrize("value", [None, "", "  "])
+@pytest.mark.parametrize("value", [None, "", "  ", ":", " : "])
 @patch("pubgrade_sidecar.controllers.config.load_kube_config")
 def test_load_kube_config_outside_cluster_refuses_default(
     mock_kube_config: MagicMock,

@@ -88,10 +88,9 @@ kubeconfig. It never falls back to the default kubeconfig (`~/.kube/config`),
 so that it can't act on whatever cluster happens to be active: without
 `KUBECONFIG` (or with an empty value), it refuses to start, with an error that
 says so. It also refuses to start if `KUBECONFIG` names a file that doesn't
-exist, e.g., a mistyped path, or one that can't be read or parsed (e.g., a
-directory, a file it may not read, or invalid YAML). Version 0.3.1 and earlier
-fell back to the default kubeconfig (see
-[Running outside a cluster after 0.3.1](#running-outside-a-cluster-after-031)).
+exist, e.g., a mistyped path, or one that isn't a readable kubeconfig (e.g., a
+directory, a file it may not read, invalid YAML, or YAML that isn't a
+mapping).
 
 `KUBECONFIG` counts as given wherever it comes from, also when your shell
 exports it (e.g., for kubectl or a tool that switches clusters): then the
@@ -112,7 +111,9 @@ To start it without a cluster, e.g., to try the API, give an empty kubeconfig
 (`KUBECONFIG=/dev/null`): the sidecar starts with a warning, and calls that
 need the Kubernetes API fail with 500. Any kubeconfig that the Kubernetes
 client rejects as invalid (e.g., one without a usable context) is likewise only
-a warning, so check the logs for "Kubernetes configuration not loaded". See
+a warning, so check the logs for "Kubernetes configuration not loaded". An
+empty file among several in `KUBECONFIG` makes the client reject all of them,
+so don't combine `/dev/null` with a real kubeconfig. See
 [Development](development.md) for running it from the repository.
 
 ## Rollouts and Helm

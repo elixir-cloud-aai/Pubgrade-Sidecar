@@ -57,25 +57,28 @@ def _load_kube_config() -> None:
         kubernetes.config.ConfigException: In a cluster, if the configuration
             can't be loaded; outside a cluster, if `KUBECONFIG` is unset or
             empty, or names a file that doesn't exist.
+        OSError: Outside a cluster, if a file in `KUBECONFIG` can't be read,
+            e.g., a directory.
+        yaml.YAMLError: Outside a cluster, if a file in `KUBECONFIG` isn't
+            valid YAML.
+        TypeError: Outside a cluster, if a file in `KUBECONFIG` is YAML but
+            not a mapping.
     """
     if os.getenv("KUBERNETES_SERVICE_HOST"):
         config.load_incluster_config()
         return
     # Passed on explicitly: the client reads `KUBECONFIG` only once, on import
     kubeconfig = os.getenv("KUBECONFIG", "").strip()
-    if not kubeconfig:
+    # Separated by `:`, as the client splits it
+    paths = [path for path in kubeconfig.split(":") if path.strip()]
+    if not paths:
         raise config.ConfigException(
             "Not running in a cluster and no kubeconfig given: refusing to use "
             "the default kubeconfig (~/.kube/config) and its active context. "
             "Set KUBECONFIG to the kubeconfig of the cluster to manage, or to "
             "an empty file to run without a cluster."
         )
-    # Separated by `:`, as the client splits it
-    missing = [
-        path
-        for path in kubeconfig.split(":")
-        if path and not os.path.exists(os.path.expanduser(path))
-    ]
+    missing = [path for path in paths if not os.path.exists(os.path.expanduser(path))]
     if missing:
         raise config.ConfigException(
             f"KUBECONFIG names files that don't exist: {', '.join(missing)}"
