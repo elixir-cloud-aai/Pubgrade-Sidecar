@@ -3,7 +3,7 @@
 ## to install them; mounted into the step that uses it only, so that the image
 ## doesn't contain it (the FOCA image has no pip). Pinned by digest; Dependabot
 ## updates the tag and digest together
-FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.10@sha256:a3ea1357342c1a4bf9a0c53a3deb1b55379aefa037338d8113d5771efa01774f AS uv
 
 ##### BASE IMAGE #####
 ## Pinned by digest, so that rebuilds use the same base image. FOCA is bumped
