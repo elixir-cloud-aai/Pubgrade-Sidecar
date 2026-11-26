@@ -6,7 +6,7 @@
 ##
 ## BusyBox's `httpd`, pinned by digest (Dependabot updates the tag and digest
 ## together); no code of our own, no shell needed at runtime.
-FROM busybox:1.37.0-musl@sha256:f6a95d611e0a8780fabdb2aec43e31275b2720dfefa3e41b16835bfc42454478
+FROM busybox:1.38.0-musl@sha256:80e38f9a1b39188b8bdb28879178edb322a4402b081a9aedda1924609decd6f6
 
 ## Version (`X.Y.Z`) and commit (hex) of the build; the workflow sets both.
 ## They are checked, so that nothing else ends up in the JSON
