@@ -77,6 +77,32 @@ token at start:
 kubectl -n production rollout restart deployment/pubgrade-sidecar
 ```
 
+## Running outside a cluster
+
+In a pod, the sidecar uses the service account of the pod, and fails at start
+if it can't load that configuration. Outside a cluster (no
+`KUBERNETES_SERVICE_HOST` in the environment), it uses only a kubeconfig given
+explicitly in the environment variable `KUBECONFIG` (a path, or several
+separated by `:`, as for kubectl), with the active context of that
+kubeconfig. It never falls back to the default kubeconfig (`~/.kube/config`),
+so that it can't act on whatever cluster happens to be active: without
+`KUBECONFIG` (or with an empty value), it refuses to start, with an error that
+says so. Up to version 0.3.1, it fell back to the default kubeconfig.
+
+For the image, mount the kubeconfig and name it, e.g.:
+
+```bash
+docker run --publish 8080:8080 --env ACCESS_TOKEN="$(openssl rand -hex 32)" \
+  --volume "$PWD/sidecar-kubeconfig:/kubeconfig:ro" --env KUBECONFIG=/kubeconfig \
+  elixircloud/pubgrade-sidecar:<version>
+```
+
+To start it without a cluster, e.g., to try the API, give an empty kubeconfig
+(`KUBECONFIG=/dev/null`): the sidecar starts with a warning, and calls that
+need the Kubernetes API fail with 500. A kubeconfig that is given but can't be
+loaded is likewise only a warning. See [Development](development.md) for
+running it from the repository.
+
 ## Rollouts and Helm
 
 A rollout changes only the image of the target Deployment's containers
