@@ -128,6 +128,25 @@ def test_load_kube_config_outside_cluster_missing_file(
     mock_kube_config.assert_not_called()
 
 
+def test_load_kube_config_outside_cluster_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Test that a `KUBECONFIG` that can't be read fails the start.
+
+    A directory stands for any path that exists but can't be read as a file,
+    e.g., where Docker created a directory for a mistyped volume source.
+
+    Args:
+        monkeypatch: Fixture for changing the environment.
+        tmp_path: Directory given as the kubeconfig.
+    """
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
+    monkeypatch.setenv("KUBECONFIG", str(tmp_path))
+    with pytest.raises(OSError):
+        _load_kube_config()
+
+
 def test_load_kube_config_outside_cluster_explicit_loaded(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -49,7 +49,8 @@ def _load_kube_config() -> None:
     given explicitly in `KUBECONFIG`: the default one (`~/.kube/config`) and
     its active context are refused, so that the sidecar never acts on whatever
     cluster happens to be active. A file that is missing, e.g., a mistyped
-    path, is refused too; one that exists but can't be loaded, e.g., an empty
+    path, is refused too, and one that can't be read or parsed fails the
+    start. A kubeconfig that the client rejects as invalid, e.g., an empty
     file for running without a cluster, is only a warning.
 
     Raises:
