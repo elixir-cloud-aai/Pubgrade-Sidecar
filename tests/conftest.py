@@ -8,6 +8,9 @@ import pytest
 # requires. This runs before the test modules are imported, so that the tests
 # can also be collected in a pod, e.g., on a CI runner in a cluster
 os.environ.pop("KUBERNETES_SERVICE_HOST", None)
+# Outside a cluster, the sidecar refuses the default kubeconfig; an empty one
+# is given instead, so that the tests never load a real one
+os.environ["KUBECONFIG"] = os.devnull
 
 
 @pytest.fixture(autouse=True)

@@ -45,18 +45,31 @@ def _load_kube_config() -> None:
     """Load the configuration of the Kubernetes client.
 
     In a cluster, the configuration of the pod is required, so that a sidecar
-    that can't work fails at startup. Outside a cluster, e.g., for the unit
-    tests, a missing configuration is only a warning.
+    that can't work fails at startup. Outside a cluster, the kubeconfig must be
+    given explicitly in `KUBECONFIG`: the default one (`~/.kube/config`) and
+    its active context are refused, so that the sidecar never acts on whatever
+    cluster happens to be active. A given kubeconfig that can't be loaded,
+    e.g., an empty file for running without a cluster, is only a warning.
 
     Raises:
         kubernetes.config.ConfigException: In a cluster, if the configuration
-            can't be loaded.
+            can't be loaded; outside a cluster, if `KUBECONFIG` is unset or
+            empty.
     """
     if os.getenv("KUBERNETES_SERVICE_HOST"):
         config.load_incluster_config()
         return
+    # Passed on explicitly: the client reads `KUBECONFIG` only once, on import
+    kubeconfig = os.getenv("KUBECONFIG", "").strip()
+    if not kubeconfig:
+        raise config.ConfigException(
+            "Not running in a cluster and no kubeconfig given: refusing to use "
+            "the default kubeconfig (~/.kube/config) and its active context. "
+            "Set KUBECONFIG to the kubeconfig of the cluster to manage, or to "
+            "an empty file to run without a cluster."
+        )
     try:
-        config.load_kube_config()
+        config.load_kube_config(config_file=kubeconfig)
     except config.ConfigException as exc:
         logger.warning(
             "Kubernetes configuration not loaded, API calls will fail: %s", exc
