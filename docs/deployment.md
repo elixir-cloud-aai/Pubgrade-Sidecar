@@ -87,9 +87,14 @@ separated by `:`, as for kubectl), with the active context of that
 kubeconfig. It never falls back to the default kubeconfig (`~/.kube/config`),
 so that it can't act on whatever cluster happens to be active: without
 `KUBECONFIG` (or with an empty value), it refuses to start, with an error that
-says so. Up to version 0.3.1, it fell back to the default kubeconfig.
+says so. It also refuses to start if `KUBECONFIG` names a file that doesn't
+exist, e.g., a mistyped path. Version 0.3.1 and earlier fell back to the
+default kubeconfig (see
+[Running outside a cluster after 0.3.1](#running-outside-a-cluster-after-031)).
 
-For the image, mount the kubeconfig and name it, e.g.:
+For the image, mount the kubeconfig and name it, e.g., as below. The image runs
+as user 1000, which must be able to read the file (e.g., add
+`--user "$(id -u)"` for a file only you can read):
 
 ```bash
 docker run --publish 8080:8080 --env ACCESS_TOKEN="$(openssl rand -hex 32)" \
@@ -99,8 +104,9 @@ docker run --publish 8080:8080 --env ACCESS_TOKEN="$(openssl rand -hex 32)" \
 
 To start it without a cluster, e.g., to try the API, give an empty kubeconfig
 (`KUBECONFIG=/dev/null`): the sidecar starts with a warning, and calls that
-need the Kubernetes API fail with 500. A kubeconfig that is given but can't be
-loaded is likewise only a warning. See [Development](development.md) for
+need the Kubernetes API fail with 500. A kubeconfig that exists but can't be
+loaded (e.g., not readable) is likewise only a warning, so check the logs for
+"Kubernetes configuration not loaded". See [Development](development.md) for
 running it from the repository.
 
 ## Rollouts and Helm
@@ -435,6 +441,15 @@ resources:
 ```
 
 Values you set are merged with the defaults; set a key to `null` to remove it.
+
+## Running outside a cluster after 0.3.1
+
+Releases after 0.3.1 no longer use the default kubeconfig (`~/.kube/config`)
+outside a cluster (see [Running outside a cluster](#running-outside-a-cluster)).
+Deployments with the chart, or any other in-cluster deployment, need no
+action. If you run the sidecar or its image outside a cluster, set
+`KUBECONFIG` to the kubeconfig it should use (or to `/dev/null` to run without
+a cluster); otherwise it refuses to start.
 
 ## Upgrading to chart version 0.3.1
 

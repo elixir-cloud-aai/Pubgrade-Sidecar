@@ -29,11 +29,8 @@ cd app
 ACCESS_TOKEN=local KUBECONFIG=/dev/null uv run python -m pubgrade_sidecar.app
 ```
 
-Outside a cluster, the sidecar refuses to start unless `KUBECONFIG` names a
-kubeconfig: it never uses the default one (`~/.kube/config`) and its active
-context. An empty one (`/dev/null`) only logs a warning, and calls that need
-the Kubernetes API fail; to work against a test cluster, set `KUBECONFIG` to
-its kubeconfig (see
+Without `KUBECONFIG`, it refuses to start; to work against a test cluster, set
+`KUBECONFIG` to its kubeconfig (see
 [Running outside a cluster](deployment.md#running-outside-a-cluster)).
 
 The unit tests need neither a cluster nor a Kubernetes configuration (they set

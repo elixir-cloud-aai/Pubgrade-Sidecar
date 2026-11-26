@@ -48,13 +48,14 @@ def _load_kube_config() -> None:
     that can't work fails at startup. Outside a cluster, the kubeconfig must be
     given explicitly in `KUBECONFIG`: the default one (`~/.kube/config`) and
     its active context are refused, so that the sidecar never acts on whatever
-    cluster happens to be active. A given kubeconfig that can't be loaded,
-    e.g., an empty file for running without a cluster, is only a warning.
+    cluster happens to be active. A file that is missing, e.g., a mistyped
+    path, is refused too; one that exists but can't be loaded, e.g., an empty
+    file for running without a cluster, is only a warning.
 
     Raises:
         kubernetes.config.ConfigException: In a cluster, if the configuration
             can't be loaded; outside a cluster, if `KUBECONFIG` is unset or
-            empty.
+            empty, or names a file that doesn't exist.
     """
     if os.getenv("KUBERNETES_SERVICE_HOST"):
         config.load_incluster_config()
@@ -67,6 +68,16 @@ def _load_kube_config() -> None:
             "the default kubeconfig (~/.kube/config) and its active context. "
             "Set KUBECONFIG to the kubeconfig of the cluster to manage, or to "
             "an empty file to run without a cluster."
+        )
+    # Separated by `:`, as the client splits it
+    missing = [
+        path
+        for path in kubeconfig.split(":")
+        if path and not os.path.exists(os.path.expanduser(path))
+    ]
+    if missing:
+        raise config.ConfigException(
+            f"KUBECONFIG names files that don't exist: {', '.join(missing)}"
         )
     try:
         config.load_kube_config(config_file=kubeconfig)

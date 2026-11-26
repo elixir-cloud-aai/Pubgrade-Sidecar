@@ -103,11 +103,29 @@ def test_load_kube_config_outside_cluster_explicit(
     tmp_path: Path,
 ) -> None:
     """Test that a kubeconfig given in `KUBECONFIG` is used outside a cluster."""
-    kubeconfig = str(tmp_path / "kubeconfig")
+    first = _write_kubeconfig(tmp_path / "first", "first")
+    second = _write_kubeconfig(tmp_path / "second", "second")
+    kubeconfig = f"{first}:{second}"
     monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
     monkeypatch.setenv("KUBECONFIG", kubeconfig)
     _load_kube_config()
     mock_kube_config.assert_called_once_with(config_file=kubeconfig)
+
+
+@patch("pubgrade_sidecar.controllers.config.load_kube_config")
+def test_load_kube_config_outside_cluster_missing_file(
+    mock_kube_config: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Test that a `KUBECONFIG` naming a missing file is refused."""
+    present = _write_kubeconfig(tmp_path / "present", "present")
+    missing = tmp_path / "mistyped"
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
+    monkeypatch.setenv("KUBECONFIG", f"{present}:{missing}")
+    with pytest.raises(config.ConfigException, match="mistyped"):
+        _load_kube_config()
+    mock_kube_config.assert_not_called()
 
 
 def test_load_kube_config_outside_cluster_explicit_loaded(
