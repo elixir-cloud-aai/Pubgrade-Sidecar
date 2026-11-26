@@ -173,8 +173,10 @@ jobs:
       - name: Build documentation
         run: mkdocs build --strict
 
-  # Builds the image from the commit and starts it, without a cluster: the API
-  # answers, and the access token is checked against the environment
+  # Builds the image from the commit and starts it, without a cluster: it
+  # refuses to start without a kubeconfig given in `KUBECONFIG`, and with an
+  # empty one, the API answers and the access token is checked against the
+  # environment
   smoke:
     name: Smoke test
     runs-on: ubuntu-latest
@@ -188,8 +190,26 @@ jobs:
           persist-credentials: false
       - name: Build image
         run: docker build --tag pubgrade-sidecar:smoke .
+      - name: Check that the default kubeconfig is refused
+        run: |
+          set +e
+          logs="$(timeout 60 docker run --name refused \
+            --env ACCESS_TOKEN=smoke pubgrade-sidecar:smoke 2>&1)"
+          status=$?
+          set -e
+          docker rm --force refused > /dev/null
+          if [ "${status}" = 0 ] || [ "${status}" = 124 ]; then
+            echo "::error::Expected the app to exit with an error, got ${status}"
+            echo "${logs}"
+            exit 1
+          fi
+          if ! grep --quiet "refusing to use the default kubeconfig" <<< "${logs}"; then
+            echo "::error::Expected the refusal in the logs"
+            echo "${logs}"
+            exit 1
+          fi
       - name: Start app
-        run: docker run --detach --name sidecar --publish 8080:8080 --env ACCESS_TOKEN=smoke pubgrade-sidecar:smoke
+        run: docker run --detach --name sidecar --publish 8080:8080 --env ACCESS_TOKEN=smoke --env KUBECONFIG=/dev/null pubgrade-sidecar:smoke
       - name: Check that app responds
         run: |
           curl --fail --silent --show-error --output /dev/null \
