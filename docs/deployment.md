@@ -77,6 +77,45 @@ token at start:
 kubectl -n production rollout restart deployment/pubgrade-sidecar
 ```
 
+## Running outside a cluster
+
+In a pod, the sidecar uses the service account of the pod, and fails at start
+if it can't load that configuration. Outside a cluster (no
+`KUBERNETES_SERVICE_HOST` in the environment), it uses only a kubeconfig given
+explicitly in the environment variable `KUBECONFIG` (a path, or several
+separated by `:`, or `;` on Windows, as for kubectl), with the active context of that
+kubeconfig. It never falls back to the default kubeconfig (`~/.kube/config`),
+so that it can't act on whatever cluster happens to be active: without
+`KUBECONFIG` (or with an empty value), it refuses to start, with an error that
+says so. It also refuses to start if `KUBECONFIG` names a file that doesn't
+exist, e.g., a mistyped path, or one that isn't a readable kubeconfig (e.g., a
+directory, a file it may not read, invalid YAML, or YAML that isn't a
+mapping).
+
+`KUBECONFIG` counts as given wherever it comes from, also when your shell
+exports it (e.g., for kubectl or a tool that switches clusters): then the
+sidecar uses that kubeconfig and its active context. Set `KUBECONFIG` on the
+sidecar's own command line, to a kubeconfig made for it.
+
+For the image, mount the kubeconfig and name it, e.g., as below. The image runs
+as user 1000, which must be able to read the file (e.g., add
+`--user "$(id -u)"` for a file only you can read):
+
+```bash
+docker run --publish 8080:8080 --env ACCESS_TOKEN="$(openssl rand -hex 32)" \
+  --volume "$PWD/sidecar-kubeconfig:/kubeconfig:ro" --env KUBECONFIG=/kubeconfig \
+  elixircloud/pubgrade-sidecar:<version>
+```
+
+To start it without a cluster, e.g., to try the API, give an empty kubeconfig
+(`KUBECONFIG=/dev/null`): the sidecar starts with a warning, and calls that
+need the Kubernetes API fail with 500. Any kubeconfig that the Kubernetes
+client rejects as invalid (e.g., one without a usable context) is likewise only
+a warning, so check the logs for "Kubernetes configuration not loaded". An
+empty file among several in `KUBECONFIG` makes the client reject all of them,
+so don't combine `/dev/null` with a real kubeconfig. See
+[Development](development.md) for running it from the repository.
+
 ## Rollouts and Helm
 
 A rollout changes only the image of the target Deployment's containers
@@ -409,6 +448,15 @@ resources:
 ```
 
 Values you set are merged with the defaults; set a key to `null` to remove it.
+
+## Running outside a cluster after 0.3.1
+
+Releases after 0.3.1 no longer use the default kubeconfig (`~/.kube/config`)
+outside a cluster (see [Running outside a cluster](#running-outside-a-cluster)).
+Deployments with the chart, or any other in-cluster deployment, need no
+action. If you run the sidecar or its image outside a cluster, set
+`KUBECONFIG` to the kubeconfig it should use (or to `/dev/null` to run without
+a cluster); otherwise it refuses to start.
 
 ## Upgrading to chart version 0.3.1
 

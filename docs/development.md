@@ -22,14 +22,19 @@ The app is built on [FOCA](https://foca.readthedocs.io/): its configuration is
 (`create_app()`). The image serves it with Gunicorn, with FOCA's settings
 (`foca.gunicorn_config`): one worker process with threads, as the sidecar
 keeps its deliveries in memory. To run it locally with Flask's development
-server, on port 8080:
+server, on port 8080, without a cluster:
 
 ```bash
 cd app
-ACCESS_TOKEN=local uv run python -m pubgrade_sidecar.app
+ACCESS_TOKEN=local KUBECONFIG=/dev/null uv run python -m pubgrade_sidecar.app
 ```
 
-They need neither a cluster nor a Kubernetes configuration, and fail below 100%
+Without `KUBECONFIG`, it refuses to start; to work against a test cluster, set
+`KUBECONFIG` to its kubeconfig (see
+[Running outside a cluster](deployment.md#running-outside-a-cluster)).
+
+The unit tests need neither a cluster nor a Kubernetes configuration (they set
+`KUBECONFIG` to an empty one, so they never load yours), and fail below 100%
 coverage. The chart tests in `tests/chart` run if Helm is installed. The test
 of the availability check against a real registry runs if `OCI_REGISTRY` names
 one that serves HTTP, as in CI:
