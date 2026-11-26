@@ -423,17 +423,14 @@ logged with its reason. If the sidecar checks Docker Hub from a cluster whose
 pods share one egress IP (e.g., CSC Rahti), set `registryCredentials` (see
 [Registries](#registries)), as anonymous checks can get 429 there.
 
-The image of 0.3.1 is built on FOCA 0.23 (image
+The sidecar image 0.3.1 is built on FOCA 0.23 (image
 `elixircloud/foca:0.23.0-py3.13`) instead of FOCA 0.22, whose base image has
-a fixable high vulnerability of `libzstd1` (CVE-2026-124851). None of the
-changes in FOCA's [migration
-guide](https://foca.readthedocs.io/en/v0.23.0/migration-0.23/) need action
-for the sidecar: it checks its own `X-Access-Token` header, not bearer tokens
-validated by FOCA, so subjects and the order of the token and body checks
-don't apply; its configuration keeps the body limit of 64 KiB
-(`server.max_content_length`), and its API has no URL-encoded bodies, no
-`pattern`, no patches of specifications, permissions API, plugin store or
-WES gateway.
+a fixable high vulnerability of `libzstd1` (CVE-2026-124851). This needs no
+action: the changes in FOCA's [migration
+guide](https://foca.readthedocs.io/en/v0.23.0/migration-0.23/) concern
+bearer tokens validated by FOCA (the sidecar checks its own `X-Access-Token`
+header) and features the sidecar doesn't use, and its body limit stays at
+64 KiB (`server.max_content_length`).
 
 ## Changed image tags (November 2026)
 
