@@ -11,7 +11,7 @@ FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb22
 ## together (`.github/dependabot.yml`; `tests/unit/test_image.py` checks that
 ## they match, and that the Python version is the one `pyproject.toml`
 ## requires)
-FROM elixircloud/foca:0.22.0-py3.13@sha256:bf02db1195d60940dd3b29e53ce4757854155e258f35199e28d778cbf6128f9a
+FROM elixircloud/foca:0.23.0-py3.13@sha256:a3b53a07399a1e6c8d9ea192f6b6cd6b16db18d10cf10d29aa4cd4d2faec5057
 
 ##### METADATA #####
 ## OCI annotations; images built from the FOCA image inherit its own, so all
