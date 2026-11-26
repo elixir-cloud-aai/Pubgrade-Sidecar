@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 from flask import Response, jsonify, request
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
+from kubernetes.config.kube_config import ENV_KUBECONFIG_PATH_SEPARATOR
 from packaging.version import InvalidVersion, Version
 import requests
 
@@ -69,8 +70,11 @@ def _load_kube_config() -> None:
         return
     # Passed on explicitly: the client reads `KUBECONFIG` only once, on import
     kubeconfig = os.getenv("KUBECONFIG", "").strip()
-    # Separated by `:`, as the client splits it
-    paths = [path for path in kubeconfig.split(":") if path.strip()]
+    # Split as the client splits it (`:`, or `;` on Windows); it also skips
+    # empty parts and expands `~`
+    paths = [
+        path for path in kubeconfig.split(ENV_KUBECONFIG_PATH_SEPARATOR) if path.strip()
+    ]
     if not paths:
         raise config.ConfigException(
             "Not running in a cluster and no kubeconfig given: refusing to use "

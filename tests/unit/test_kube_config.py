@@ -128,6 +128,45 @@ def test_load_kube_config_outside_cluster_missing_file(
     mock_kube_config.assert_not_called()
 
 
+@patch("pubgrade_sidecar.controllers.config.load_kube_config")
+def test_load_kube_config_outside_cluster_windows_separator(
+    mock_kube_config: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Test that paths are split with the client's separator.
+
+    On Windows, the client separates paths with `;`, and a drive letter's `:`
+    is part of the path.
+    """
+    kubeconfig = str(_write_kubeconfig(tmp_path / "C:kubeconfig", "drive"))
+    monkeypatch.setattr(
+        "pubgrade_sidecar.controllers.ENV_KUBECONFIG_PATH_SEPARATOR", ";"
+    )
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
+    monkeypatch.setenv("KUBECONFIG", f"{kubeconfig};")
+    _load_kube_config()
+    mock_kube_config.assert_called_once_with(config_file=f"{kubeconfig};")
+
+
+def test_load_kube_config_outside_cluster_home_and_empty_parts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Test that `~` and empty parts in `KUBECONFIG` work with the client.
+
+    The client expands `~` and skips empty parts itself, so the value is
+    passed on as it is.
+    """
+    monkeypatch.setattr(client.Configuration, "_default", None)
+    _write_kubeconfig(tmp_path / "kubeconfig", "home")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
+    monkeypatch.setenv("KUBECONFIG", ":~/kubeconfig:")
+    _load_kube_config()
+    assert client.Configuration.get_default_copy().host == "https://127.0.0.1:1"
+
+
 def test_load_kube_config_outside_cluster_unreadable(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

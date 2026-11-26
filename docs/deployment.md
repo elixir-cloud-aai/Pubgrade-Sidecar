@@ -83,7 +83,7 @@ In a pod, the sidecar uses the service account of the pod, and fails at start
 if it can't load that configuration. Outside a cluster (no
 `KUBERNETES_SERVICE_HOST` in the environment), it uses only a kubeconfig given
 explicitly in the environment variable `KUBECONFIG` (a path, or several
-separated by `:`, as for kubectl), with the active context of that
+separated by `:`, or `;` on Windows, as for kubectl), with the active context of that
 kubeconfig. It never falls back to the default kubeconfig (`~/.kube/config`),
 so that it can't act on whatever cluster happens to be active: without
 `KUBECONFIG` (or with an empty value), it refuses to start, with an error that
